@@ -1,11 +1,9 @@
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
-  username: {
+  name: {
     type: String,
     required: true,
-    unique: true,
-    trim: true
   },
   email: {
     type: String,
@@ -14,46 +12,11 @@ const userSchema = new mongoose.Schema({
     trim: true,
     lowercase: true
   },
-  googleId: {
-    type: String,
-    unique: true,
-    sparse: true
-  },
-  authProvider: {
-    type: String,
-    enum: ['local', 'google'],
-    default: 'local'
-  },
-  password: {
-    type: String,
-    required: true
-  },
-  firstName: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  lastName: {
-    type: String,
-    required: true,
-    trim: true
-  },
   profilePicture: {
     type: String,
     default: ''
   },
-  headline: {
-    type: String,
-    default: ''
-  },
-  bio: {
-    type: String,
-    default: ''
-  },
-  location: {
-    type: String,
-    default: ''
-  },
+ 
   isActive: {
     type: Boolean,
     default: true

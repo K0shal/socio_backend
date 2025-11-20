@@ -1,4 +1,3 @@
-
 const Hapi = require('@hapi/hapi');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -7,44 +6,49 @@ const allRoutes = require('./routes/index');
 const SocketHandler = require('./socket/index');
 
 const init = async () => {
-  // Create Hapi server
+
   const server = Hapi.server({
     port: process.env.PORT || 3000,
     host: 'localhost',
-    routes: {
-      cors: {
-        origin: ['*'],
-        headers: ['Accept', 'Authorization', 'Content-Type', 'If-None-Match', 'Accept-language']
-      }
+     routes: {
+        cors: true 
     }
   });
 
-  // Create HTTP server for Socket.io
+
   const httpServer = http.createServer(server.listener);
+
+
   const io = socketIo(httpServer, {
     cors: {
       origin: "*",
-      methods: ["GET", "POST"]
+      methods: ["GET", "POST", "PUT", "PATCH"]
     }
   });
 
-  // Connect to database
+
   connectDB();
 
-  // Register routes
+
   server.route(allRoutes);
 
-  // Initialize Socket.io handler
+
+  await server.start();
+  console.log(`Hapi Server: http://localhost:${server.info.port}`);
+
+
+  httpServer.listen(server.info.port, () => {
+    console.log(`Socket.IO Server: ws://localhost:${server.info.port}`);
+  });
+
+
   new SocketHandler(io);
-  await httpServer.listen(server.info.port);
-  console.log(`HTTP Server: http://localhost:${server.info.port}`);
-  console.log(`Socket.IO Server: ws://localhost:${server.info.port}`);
 
   return server;
 };
 
 init().catch(err => {
-  console.error('Error starting server:', err);
+  console.error("Error starting server:", err);
   process.exit(1);
 });
 
