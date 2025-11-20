@@ -9,9 +9,21 @@ const authRoutes = [
     options: {
       auth: false,
       validate: {
-       
+        payload: googleTokenSchema
       },
       description: 'Verify Google ID token and authenticate user'
+    }
+  },
+  {
+    method: 'GET',
+    path: '/api/auth/me',
+    handler: getCurrentUser,
+    options: {
+      auth: {
+        strategy: 'jwt',
+        mode: 'required'
+      },
+      description: 'Get current authenticated user'
     }
   }
 ];

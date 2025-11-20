@@ -2,6 +2,7 @@ const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const config = require('../config/config');
+const { authResponse, successResponse, errorResponse, notFoundResponse, unauthorizedResponse, serverErrorResponse } = require('../common');
 
 const client = new OAuth2Client(config.GOOGLE_CLIENT_ID);
 
@@ -34,48 +35,40 @@ const verifyGoogleToken = async (request, h) => {
       config.JWT_SECRET
     );
 
-    return h.response({
-      message: 'Authentication successful',
-      user: {
-        id: user._id,
-        email: user.email,
-        profilePicture: user.profilePicture
-      },
-      token: jwtToken
-    }).code(200);
+    return authResponse(h, user, jwtToken);
 
   } catch (error) {
     console.error('Google token verification error:', error);
-    return h.response({ error: 'Invalid token' }).code(401);
+    return unauthorizedResponse(h, 'Invalid token');
   }
 };
 
-// Get current user
+
 const getCurrentUser = async (request, h) => {
   try {
     const user = await User.findById(request.user.userId).select('-password');
     if (!user) {
-      return h.response({ error: 'User not found' }).code(404);
+      return notFoundResponse(h, 'User not found');
     }
-    return h.response({ user }).code(200);
+    return successResponse(h, { user }, 'User retrieved successfully');
   } catch (error) {
     console.error('Get current user error:', error);
-    return h.response({ error: 'Failed to get user' }).code(500);
+    return serverErrorResponse(h, 'Failed to get user');
   }
 };
 
-// Verify JWT token middleware
+
 const authenticateToken = (request, h) => {
   const authHeader = request.headers['authorization'];
 
   if (!authHeader) {
-    return h.response({ error: 'Authorization header required' }).code(401);
+    return unauthorizedResponse(h, 'Authorization header required');
   }
 
   const token = authHeader.split(' ')[1];
 
   if (!token) {
-    return h.response({ error: 'Token required' }).code(401);
+    return unauthorizedResponse(h, 'Token required');
   }
 
   try {
@@ -83,7 +76,7 @@ const authenticateToken = (request, h) => {
     request.user = decoded;
     return h.continue;
   } catch (error) {
-    return h.response({ error: 'Invalid token' }).code(401);
+    return unauthorizedResponse(h, 'Invalid token');
   }
 };
 
