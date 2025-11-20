@@ -1,4 +1,4 @@
-const { verifyGoogleToken, getCurrentUser, authenticateToken } = require('../controllers');
+const { verifyGoogleToken, getCurrentUser, updateProfile, authenticateToken } = require('../controllers');
 const { googleTokenSchema } = require('../validators/authValidator');
 
 const authRoutes = [
@@ -24,6 +24,18 @@ const authRoutes = [
         mode: 'required'
       },
       description: 'Get current authenticated user'
+    }
+  },
+  {
+    method: 'PUT',
+    path: '/api/auth/update-profile',
+    handler: updateProfile,
+    options: {
+      auth: {
+        strategy: 'jwt',
+        mode: 'required'
+      },
+      description: 'Update user profile'
     }
   }
 ];

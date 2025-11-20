@@ -1,7 +1,8 @@
-const { verifyGoogleToken, getCurrentUser, authenticateToken } = require('./authController');
+const { verifyGoogleToken, getCurrentUser, updateProfile, authenticateToken } = require('./authController');
 
 module.exports = {
   verifyGoogleToken,
   getCurrentUser,
+  updateProfile,
   authenticateToken,
 };

@@ -57,6 +57,29 @@ const getCurrentUser = async (request, h) => {
   }
 };
 
+const updateProfile = async (request, h) => {
+  try {
+    const { name, profilePicture } = request.payload;
+    const userId = request.auth.credentials.userId;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return notFoundResponse(h, 'User not found');
+    }
+
+
+    if (name) user.name = name;
+    if (profilePicture !== undefined) user.profilePicture = profilePicture;
+
+    await user.save();
+
+    return successResponse(h, { user }, 'Profile updated successfully');
+  } catch (error) {
+    console.error('Update profile error:', error);
+    return serverErrorResponse(h, 'Failed to update profile');
+  }
+};
+
 
 const authenticateToken = (request, h) => {
   const authHeader = request.headers['authorization'];
@@ -83,5 +106,6 @@ const authenticateToken = (request, h) => {
 module.exports = {
   verifyGoogleToken,
   getCurrentUser,
+  updateProfile,
   authenticateToken
 };
