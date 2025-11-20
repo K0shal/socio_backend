@@ -1,0 +1,117 @@
+const { OAuth2Client } = require('google-auth-library');
+const User = require('../models/User');
+const jwt = require('jsonwebtoken');
+const config = require('../config/config');
+
+const client = new OAuth2Client(config.GOOGLE_CLIENT_ID);
+
+const verifyGoogleToken = async (request, h) => {
+  try {
+    const { token } = request.payload;
+
+    // Verify Google ID token
+    const ticket = await client.verifyIdToken({
+      idToken: token,
+      audience: config.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    
+    // Extract user information from Google token
+    const { sub: googleId, email, name, picture } = payload;
+
+    // Find or create user in database
+    let user = await User.findOne({ email });
+    
+    if (!user) {
+      // Create new user if doesn't exist
+      user = new User({
+        googleId,
+        email,
+        firstName: name.split(' ')[0],
+        lastName: name.split(' ')[1] || '',
+        username: email.split('@')[0], // Use email prefix as username
+        profilePicture: picture,
+        authProvider: 'google',
+        isEmailVerified: true
+      });
+      
+      await user.save();
+    } else {
+      // Update existing user's Google info
+      user.googleId = googleId;
+      user.profilePicture = picture;
+      user.lastLogin = new Date();
+      await user.save();
+    }
+
+    // Generate JWT token for our application
+    const jwtToken = jwt.sign(
+      { 
+        userId: user._id, 
+        email: user.email 
+      },
+      config.JWT_SECRET,
+      { expiresIn: config.JWT_EXPIRE }
+    );
+
+    return h.response({
+      message: 'Authentication successful',
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        profilePicture: user.profilePicture
+      },
+      token: jwtToken
+    }).code(200);
+
+  } catch (error) {
+    console.error('Google token verification error:', error);
+    return h.response({ error: 'Invalid token' }).code(401);
+  }
+};
+
+// Get current user
+const getCurrentUser = async (request, h) => {
+  try {
+    const user = await User.findById(request.user.userId).select('-password');
+    if (!user) {
+      return h.response({ error: 'User not found' }).code(404);
+    }
+    return h.response({ user }).code(200);
+  } catch (error) {
+    console.error('Get current user error:', error);
+    return h.response({ error: 'Failed to get user' }).code(500);
+  }
+};
+
+// Verify JWT token middleware
+const authenticateToken = (request, h) => {
+  const authHeader = request.headers['authorization'];
+  
+  if (!authHeader) {
+    return h.response({ error: 'Authorization header required' }).code(401);
+  }
+
+  const token = authHeader.split(' ')[1];
+  
+  if (!token) {
+    return h.response({ error: 'Token required' }).code(401);
+  }
+
+  try {
+    const decoded = jwt.verify(token, config.JWT_SECRET);
+    request.user = decoded;
+    return h.continue;
+  } catch (error) {
+    return h.response({ error: 'Invalid token' }).code(401);
+  }
+};
+
+module.exports = {
+  verifyGoogleToken,
+  getCurrentUser,
+  authenticateToken
+};
