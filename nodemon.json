@@ -1,0 +1,20 @@
+{
+  "ignore": [
+    ".git",
+    "doc/*",
+    "public/*",
+    "app/views/*",
+    "node_modules",
+    "test/*",
+    "nodemon.json",
+    "package.json"
+  ],
+  "watch": [
+    "app/controllers/*",
+    "app/lib/*",
+    "app/models/*",
+    "config/*",
+    "index.js"
+  ],
+  "ext": "js json"
+}
