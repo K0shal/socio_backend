@@ -15,6 +15,7 @@
   "dependencies": {
     "@hapi/hapi": "^21.4.4",
     "@hapi/inert": "^7.1.0",
+    "@hapi/joi": "^17.1.1",
     "@hapi/jwt": "^3.2.1",
     "@hapi/vision": "^7.0.3",
     "bcryptjs": "^3.0.3",
@@ -24,6 +25,7 @@
     "jsonwebtoken": "^9.0.2",
     "lodash": "^4.17.21",
     "mongoose": "^8.20.0",
+    "multer": "^2.0.2",
     "socket.io": "^4.8.1"
   },
   "devDependencies": {

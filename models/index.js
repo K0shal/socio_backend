@@ -6,6 +6,7 @@ const Posts = require('./Posts');
 const Storage = require('./Storage');
 const Conversations = require('./Conversations');
 const Messages = require('./Messages');
+const Likes = require('./Likes');
 
 // Export all models
 module.exports = {
@@ -15,5 +16,6 @@ module.exports = {
   Posts,
   Storage,
   Conversations,
-  Messages
+  Messages,
+  Likes
 };

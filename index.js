@@ -12,7 +12,9 @@ const init = async () => {
     port: process.env.PORT || 3000,
     host: 'localhost',
      routes: {
-        cors: true 
+        cors: {
+          origin: ['*'],
+        }
     }
   });
 
@@ -54,4 +56,3 @@ init().catch(err => {
   console.error("Error starting server:", err);
   process.exit(1);
 });
-
