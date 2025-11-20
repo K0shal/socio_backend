@@ -9,7 +9,7 @@ const client = new OAuth2Client(config.GOOGLE_CLIENT_ID);
 const verifyGoogleToken = async (request, h) => {
   try {
     const { token } = request.payload;
-    console.log(token)
+    
 
     const ticket = await client.verifyIdToken({
       idToken: token,
@@ -46,7 +46,7 @@ const verifyGoogleToken = async (request, h) => {
 
 const getCurrentUser = async (request, h) => {
   try {
-    const user = await User.findById(request.user.userId).select('-password');
+    const user = await User.findById(request.auth.credentials.userId).select('-password');
     if (!user) {
       return notFoundResponse(h, 'User not found');
     }

@@ -49,7 +49,7 @@ class SocketHandler {
             }
           });
           
-          console.log(`User ${user.email} authenticated successfully`);
+        
           
         } catch (error) {
           console.error('Socket authentication error:', error);

@@ -4,6 +4,7 @@ const socketIo = require('socket.io');
 const connectDB = require('./config/database');
 const allRoutes = require('./routes/index');
 const SocketHandler = require('./socket/index');
+const { registerAuthMiddleware } = require('./middleware/auth');
 
 const init = async () => {
 
@@ -15,6 +16,8 @@ const init = async () => {
     }
   });
 
+  // Register JWT authentication middleware
+  await registerAuthMiddleware(server);
 
   const httpServer = http.createServer(server.listener);
 
