@@ -30,7 +30,7 @@ const init = async () => {
   });
 
 
-  connectDB();
+   connectDB();
 
 
   server.route(allRoutes);
@@ -55,4 +55,3 @@ init().catch(err => {
   process.exit(1);
 });
 
-module.exports = init;

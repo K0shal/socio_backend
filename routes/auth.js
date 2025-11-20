@@ -1,4 +1,4 @@
-const { verifyGoogleToken, getCurrentUser, updateProfile, authenticateToken } = require('../controllers');
+const { verifyGoogleToken, getCurrentUser, updateProfile } = require('../controllers');
 const { googleTokenSchema } = require('../validators/authValidator');
 
 const authRoutes = [

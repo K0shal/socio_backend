@@ -81,31 +81,9 @@ const updateProfile = async (request, h) => {
 };
 
 
-const authenticateToken = (request, h) => {
-  const authHeader = request.headers['authorization'];
-
-  if (!authHeader) {
-    return unauthorizedResponse(h, 'Authorization header required');
-  }
-
-  const token = authHeader.split(' ')[1];
-
-  if (!token) {
-    return unauthorizedResponse(h, 'Token required');
-  }
-
-  try {
-    const decoded = jwt.verify(token, config.JWT_SECRET);
-    request.user = decoded;
-    return h.continue;
-  } catch (error) {
-    return unauthorizedResponse(h, 'Invalid token');
-  }
-};
 
 module.exports = {
   verifyGoogleToken,
   getCurrentUser,
   updateProfile,
-  authenticateToken
 };
