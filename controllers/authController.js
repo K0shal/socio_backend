@@ -8,7 +8,7 @@ const client = new OAuth2Client(config.GOOGLE_CLIENT_ID);
 const verifyGoogleToken = async (request, h) => {
   try {
     const { token } = request.payload;
-
+console.log(token)
     // Verify Google ID token
     const ticket = await client.verifyIdToken({
       idToken: token,
