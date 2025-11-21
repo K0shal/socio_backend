@@ -228,7 +228,9 @@ const updatePost = async (request, h) => {
   try {
     const userId = request.auth.credentials.userId;
     const { postId } = request.params;
-    const { content, visibility } = request.payload;
+    const payload = request.payload;
+
+    console.log('Update post payload:', payload);
 
     // Find the post
     const post = await Posts.findById(postId);
@@ -243,16 +245,107 @@ const updatePost = async (request, h) => {
 
     // Update post
     const updateData = {};
-    if (content !== undefined) {
-      if (!content || content.trim().length === 0) {
+    if (payload.content !== undefined) {
+      if (!payload.content || payload.content.trim().length === 0) {
         return errorResponse(h, 'Post content is required', 400);
       }
-      updateData.content = content.trim();
+      updateData.content = payload.content.trim();
     }
-    if (visibility !== undefined) {
-      updateData.visibility = visibility;
+    if (payload.visibility !== undefined) {
+      updateData.visibility = payload.visibility;
     }
 
+    // Handle media removal
+    let currentMedia = [...post.media];
+    
+    // Extract mediaToRemove from FormData
+    const mediaToRemoveArray = [];
+    
+    // Check if mediaToRemove is sent as array in FormData
+    for (const key in payload) {
+      if (key.startsWith('mediaToRemove[') && payload[key]) {
+        const mediaId = payload[key];
+        if (typeof mediaId === 'string') {
+          mediaToRemoveArray.push(mediaId);
+        }
+      }
+    }
+    
+    if (payload.mediaToRemove) {
+      if (typeof payload.mediaToRemove === 'string') {
+        try {
+          const parsed = JSON.parse(payload.mediaToRemove);
+          if (Array.isArray(parsed)) {
+            mediaToRemoveArray.push(...parsed);
+          }
+        } catch (e) {
+          // If it's not JSON, treat as single ID
+          mediaToRemoveArray.push(payload.mediaToRemove);
+        }
+      } else if (Array.isArray(payload.mediaToRemove)) {
+        mediaToRemoveArray.push(...payload.mediaToRemove);
+      }
+    }
+    
+    if (mediaToRemoveArray.length > 0) {
+      currentMedia = currentMedia.filter(mediaId => 
+        !mediaToRemoveArray.some(removeId => removeId.toString() == mediaId.toString())
+      );
+      for (const mediaId of mediaToRemoveArray) {
+        try {
+          const storageRecord = await Storage.findById(mediaId);
+          if (storageRecord) {
+            // Delete physical file
+            const filePath = path.join(__dirname, '..', storageRecord.path);
+            if (fs.existsSync(filePath)) {
+              fs.unlinkSync(filePath);
+            }
+            // Delete storage record
+            await Storage.findByIdAndDelete(mediaId);
+          }
+        } catch (error) {
+          console.error('Error removing media file:', error);
+          // Continue with other files even if one fails
+        }
+      }
+    }
+
+    // Handle new media files
+    const newMediaRecords = [];
+    
+    // Extract newMediaFiles from FormData
+    if (payload.newMediaFiles) {
+      let filesToProcess = [];
+      
+      if (Array.isArray(payload.newMediaFiles)) {
+        filesToProcess = payload.newMediaFiles;
+      } else if (payload.newMediaFiles._data || payload.newMediaFiles.buffer) {
+        // Single file
+        filesToProcess = [payload.newMediaFiles];
+      } else {
+        // Check if there are multiple newMediaFiles entries in FormData
+        for (const key in payload) {
+          if (key.startsWith('newMediaFiles[') && payload[key] && (payload[key]._data || payload[key].buffer)) {
+            filesToProcess.push(payload[key]);
+          }
+        }
+      }
+      
+      console.log('New media files to process:', filesToProcess.length);
+      
+      for (const file of filesToProcess) {
+        try {
+          const storageRecord = await saveFileAndCreateRecord(file, userId);
+          newMediaRecords.push(storageRecord._id);
+        } catch (error) {
+          console.error('Error processing new media file:', error);
+          // Continue with other files even if one fails
+        }
+      }
+    }
+
+    // Combine existing media (after removal) with new media
+    updateData.media = [...currentMedia, ...newMediaRecords];
     updateData.updatedAt = new Date();
 
     const updatedPost = await Posts.findByIdAndUpdate(

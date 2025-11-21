@@ -43,6 +43,12 @@ const routes = [
     handler: postController.updatePost,
     options: {
       auth: 'jwt',
+      payload: {
+        multipart: true,
+        output: 'stream',
+        parse: true,
+        maxBytes: 50 * 1024 * 1024, // 50MB to match frontend
+      },
     }
   },
 
