@@ -17,6 +17,9 @@ const init = async () => {
       cors: {
         origin: ["*"],
         headers: ["Accept", "Authorization", "Content-Type", "If-None-Match"],
+      },
+      state:{
+        parse:false
       }
     }
   });
@@ -41,7 +44,19 @@ const init = async () => {
     },
   });
 
-  // ------------------------------------------------------
+ 
+  // Serve static files from uploads directory
+  server.route({
+    method: 'GET',
+    path: '/uploads/{param*}',
+    handler: (request, h) => {
+      const filePath = request.params.param;
+      return h.file(path.join(__dirname, 'uploads', filePath));
+    },
+    options: {
+      auth: false
+    }
+  });
 
   server.route(allRoutes);
 
