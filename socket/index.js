@@ -60,13 +60,32 @@ class SocketHandler {
         return;
       }
       socket.join(userId);
+      
+      // Check if this user is already online (multiple tabs/devices)
+      const wasAlreadyOnline = this.onlineUsers.has(userId);
       if (!this.onlineUsers.has(userId)) {
         this.onlineUsers.set(userId, new Set());
       }
       this.onlineUsers.get(userId).add(socket.id);
+      
       socket.emit('authenticated', { message: 'Authentication successful', user: userInfo });
+      
+      // Send current online users list to the newly connected user
       socket.emit('onlineUsersList', { userIds: Array.from(this.onlineUsers.keys()) });
-      socket.broadcast.emit('userOnline', { userId });
+      
+      // Notify other users that this user is now online (only if they weren't already online)
+      if (!wasAlreadyOnline) {
+        socket.broadcast.emit('userOnline', { userId });
+      }
+      
+      // Send individual userOnline events to the newly connected user for all currently online users
+      // This ensures the new user sees everyone who is already online
+      Array.from(this.onlineUsers.keys()).forEach(onlineUserId => {
+        if (onlineUserId !== userId) {
+          socket.emit('userOnline', { userId: onlineUserId });
+        }
+      });
+      
       this.broadcastOnlineUsersDebounced();
       this.setupUserHandlers(socket);
       this.setupConversationHandlers(socket);
