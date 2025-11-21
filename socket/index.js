@@ -10,65 +10,63 @@ class SocketHandler {
   }
 
   setupEventHandlers() {
-    this.io.on('connection', (socket) => {
-     
-      // Handle authentication
-      socket.on('authenticate', async (data) => {
-        try {
-          const { token } = data;
-          
-          if (!token) {
-            socket.emit('authError', { error: 'Token is required' });
-            return;
-          }
-
-          // Verify JWT token
-          const decoded = jwt.verify(token, config.JWT_SECRET);
-          
-          // Get user details
-          const user = await User.findById(decoded.userId).select('-password');
-          
-          if (!user) {
-            socket.emit('authError', { error: 'User not found' });
-            return;
-          }
-
-          // Attach user to socket and join their personal room
-          socket.userId = user._id;
-          socket.user = user;
-          socket.join(user._id.toString());
-          
-          // Track online status
-          if (!this.onlineUsers.has(user._id.toString())) {
-            this.onlineUsers.set(user._id.toString(), new Set());
-          }
-          this.onlineUsers.get(user._id.toString()).add(socket.id);
-          
-          // Emit online status to all (friends will filter on frontend)
-          // Also send list of currently online users to the newly connected user
-          const onlineUserIds = Array.from(this.onlineUsers.keys());
-       
-          socket.emit('onlineUsersList', { userIds: onlineUserIds });
-          
-          // Emit online status to all users
-         
-          this.io.emit('userOnline', { userId: user._id.toString() });
-          
-         
-          socket.emit('authenticated', { 
-            message: 'Authentication successful',
-            user: {
-              id: user._id,
-              email: user.email,
-              name: user.name,
-              profilePicture: user.profilePicture
-            }
-          });
-          
+    // Add authentication middleware
+    this.io.use(async (socket, next) => {
+      try {
+        const token = socket.handshake.auth.token;
         
-          
-        } catch (error) {
-          socket.emit('authError', { error: 'Invalid token' });
+        if (!token) {
+          return next(new Error('Authentication required'));
+        }
+
+        // Verify JWT token
+        const decoded = jwt.verify(token, config.JWT_SECRET);
+        
+        // Get user details
+        const user = await User.findById(decoded.userId).select('-password');
+        
+        if (!user) {
+          return next(new Error('User not found'));
+        }
+
+        // Attach user to socket
+        socket.userId = user._id;
+        socket.user = user;
+        
+        next();
+      } catch (error) {
+        next(new Error('Invalid token'));
+      }
+    });
+
+    this.io.on('connection', (socket) => {
+      console.log('✅ [SOCKET] User connected:', socket.user.email, 'Socket ID:', socket.id);
+      
+      // Join their personal room
+      socket.join(socket.user._id.toString());
+      
+      // Track online status
+      if (!this.onlineUsers.has(socket.user._id.toString())) {
+        this.onlineUsers.set(socket.user._id.toString(), new Set());
+      }
+      this.onlineUsers.get(socket.user._id.toString()).add(socket.id);
+      
+      // Emit online status to all (friends will filter on frontend)
+      // Also send list of currently online users to the newly connected user
+      const onlineUserIds = Array.from(this.onlineUsers.keys());
+   
+      socket.emit('onlineUsersList', { userIds: onlineUserIds });
+      
+      // Emit online status to all users
+      this.io.emit('userOnline', { userId: socket.user._id.toString() });
+      
+      socket.emit('authenticated', { 
+        message: 'Authentication successful',
+        user: {
+          id: socket.user._id,
+          email: socket.user.email,
+          name: socket.user.name,
+          profilePicture: socket.user.profilePicture
         }
       });
       
