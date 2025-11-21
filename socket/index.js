@@ -61,6 +61,7 @@ class SocketHandler {
       this.setupConversationHandlers(socket);
       this.setupMessageHandlers(socket);
       this.setupTypingHandlers(socket);
+      this.setupFriendHandlers(socket);
       
       socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
@@ -163,6 +164,12 @@ class SocketHandler {
       const { conversationId, userId, isTyping } = data;
       socket.to(conversationId).emit('userTyping', { userId, isTyping });
     });
+  }
+
+  setupFriendHandlers(socket) {
+    // Friend request notifications are already handled in the controllers
+    // This method can be used for additional friend-related socket events if needed
+    console.log('Friend handlers setup completed');
   }
 }
 
