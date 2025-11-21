@@ -13,7 +13,6 @@ const generateUniqueFilename = (originalName) => {
   const timestamp = Date.now();
   const randomString = crypto.randomBytes(16).toString('hex');
   const uniqueFilename = `${timestamp}_${randomString}${ext}`;
-  console.log('Generating filename:', { originalName, ext, uniqueFilename });
   return uniqueFilename;
 };
 
@@ -175,7 +174,7 @@ const createPost = async (request, h) => {
 
     // Handle media files and create storage records
     const mediaStorageRecords = [];
-    console.log('Media files received:', mediaFiles);
+   
     
     // Handle both single file and array of files
     const filesToProcess = Array.isArray(mediaFiles) ? mediaFiles : (mediaFiles ? [mediaFiles] : []);
@@ -183,7 +182,7 @@ const createPost = async (request, h) => {
     if (filesToProcess.length > 0) {
       for (const file of filesToProcess) {
         try {
-          console.log('Processing file:', file);
+         
           const storageRecord = await saveFileAndCreateRecord(file, userId);
           mediaStorageRecords.push(storageRecord._id);
         } catch (error) {
@@ -230,7 +229,7 @@ const updatePost = async (request, h) => {
     const { postId } = request.params;
     const payload = request.payload;
 
-    console.log('Update post payload:', payload);
+   
 
     // Find the post
     const post = await Posts.findById(postId);
@@ -331,8 +330,7 @@ const updatePost = async (request, h) => {
         }
       }
       
-      console.log('New media files to process:', filesToProcess.length);
-      
+    
       for (const file of filesToProcess) {
         try {
           const storageRecord = await saveFileAndCreateRecord(file, userId);
@@ -497,20 +495,18 @@ const uploadMedia = async (request, h) => {
     const userId = request.auth.credentials.userId;
     const mediaFiles = request.payload.media;
 
-    console.log('Upload media - files received:', mediaFiles);
-
+ 
     if (!mediaFiles) {
       return errorResponse(h, 'No media files provided', 400);
     }
 
     // Handle both single file and array of files
     const filesToProcess = Array.isArray(mediaFiles) ? mediaFiles : [mediaFiles];
-    console.log('Upload media - files to process:', filesToProcess.length);
-
+ 
     const mediaRecords = [];
     for (const file of filesToProcess) {
       try {
-        console.log('Upload media - processing file:', file);
+          
         const storageRecord = await saveFileAndCreateRecord(file, userId);
         mediaRecords.push(storageRecord);
       } catch (error) {

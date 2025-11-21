@@ -11,8 +11,7 @@ class SocketHandler {
 
   setupEventHandlers() {
     this.io.on('connection', (socket) => {
-      console.log('🔌 New socket connection:', socket.id);
-      
+     
       // Handle authentication
       socket.on('authenticate', async (data) => {
         try {
@@ -48,14 +47,14 @@ class SocketHandler {
           // Emit online status to all (friends will filter on frontend)
           // Also send list of currently online users to the newly connected user
           const onlineUserIds = Array.from(this.onlineUsers.keys());
-          console.log('📤 Sending onlineUsersList to user:', user._id.toString(), 'users:', onlineUserIds);
+       
           socket.emit('onlineUsersList', { userIds: onlineUserIds });
           
           // Emit online status to all users
-          console.log('📤 Broadcasting userOnline for user:', user._id.toString());
+         
           this.io.emit('userOnline', { userId: user._id.toString() });
           
-          console.log('✅ User authenticated successfully:', user._id.toString());
+         
           socket.emit('authenticated', { 
             message: 'Authentication successful',
             user: {
@@ -81,7 +80,6 @@ class SocketHandler {
       this.setupFriendHandlers(socket);
       
       socket.on('disconnect', () => {
-        console.log('🔌 User disconnected:', socket.id);
         
         // Handle offline status
         if (socket.userId) {
@@ -94,7 +92,7 @@ class SocketHandler {
             // If no more sockets for this user, mark as offline
             if (userSockets.size === 0) {
               this.onlineUsers.delete(userId);
-              console.log('📤 Broadcasting userOffline for user:', userId);
+       
               this.io.emit('userOffline', { userId });
             }
           }
@@ -107,7 +105,7 @@ class SocketHandler {
    
     socket.on('joinUser', (userId) => {
       socket.join(userId);
-      console.log(`User ${userId} joined their personal room`);
+   
     });
   }
 
@@ -140,7 +138,7 @@ class SocketHandler {
         }
 
         socket.join(convId.toString());
-        console.log(`User ${socket.userId} joined conversation ${convId.toString()}`);
+       
         
         // Confirm join to client
         socket.emit('joinedConversation', { conversationId: convId.toString() });
@@ -155,7 +153,7 @@ class SocketHandler {
       const { conversationId } = data;
       const convId = conversationId?.toString() || conversationId;
       socket.leave(convId.toString());
-      console.log(`User ${socket.userId} left conversation ${convId.toString()}`);
+    
     });
   }
 
@@ -199,8 +197,7 @@ class SocketHandler {
         // Ensure conversation ID is included as string for frontend comparison
         messageObj.conversation = convId.toString();
         
-        // Broadcast message to conversation room (all participants in the room)
-        console.log('📤 Broadcasting newMessage to conversation room:', convId.toString(), 'message:', messageObj.content);
+  
         this.io.to(convId.toString()).emit('newMessage', messageObj);
         
         // Also emit to participants' personal rooms for notifications
@@ -267,9 +264,7 @@ class SocketHandler {
   }
 
   setupFriendHandlers(socket) {
-    // Friend request notifications are already handled in the controllers
-    // This method can be used for additional friend-related socket events if needed
-    console.log('Friend handlers setup completed');
+   
   }
 }
 
