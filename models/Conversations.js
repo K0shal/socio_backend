@@ -48,4 +48,10 @@ conversationSchema.pre('save', function(next) {
   next();
 });
 
+// Add indexes for better performance
+conversationSchema.index({ 'participants.user': 1, isActive: 1 });
+conversationSchema.index({ 'participants.user': 1, lastMessageAt: -1 });
+conversationSchema.index({ createdBy: 1 });
+conversationSchema.index({ lastMessageAt: -1 });
+
 module.exports = mongoose.model('Conversations', conversationSchema);

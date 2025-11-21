@@ -176,6 +176,10 @@ class SocketHandler {
   }
 
   setupMessageHandlers(socket) {
+    // Cache for friendship status to reduce DB queries
+    const friendshipCache = new Map();
+    const CACHE_TTL = 30000; // 30 seconds
+
     socket.on('sendMessage', async (data) => {
       try {
         // Check if user is authenticated
@@ -188,15 +192,18 @@ class SocketHandler {
         const convId = conversationId?.toString() || conversationId;
         const sendId = senderId?.toString() || senderId;
         
-        // Verify user is part of conversation
-        const conversation = await Conversations.findById(convId);
+        // Verify user is part of conversation (optimized query with lean)
+        const conversation = await Conversations.findById(convId)
+          .populate('participants.user', 'name email profilePicture')
+          .lean();
+        
         if (!conversation) {
           socket.emit('messageError', { error: 'Conversation not found' });
           return;
         }
 
         const isParticipant = conversation.participants.some(
-          p => p.user.toString() === sendId.toString()
+          p => p.user._id.toString() === sendId.toString()
         );
 
         if (!isParticipant) {
@@ -204,57 +211,41 @@ class SocketHandler {
           return;
         }
 
-        // Check if participants are still friends
+        // Check if participants are still friends (with caching)
         const otherParticipant = conversation.participants.find(
-          p => p.user.toString() !== sendId.toString()
+          p => p.user._id.toString() !== sendId.toString()
         );
         
         if (otherParticipant) {
-          console.log('Checking friendship between users:', {
-            senderId: sendId,
-            otherUserId: otherParticipant.user,
-            senderIdType: typeof sendId,
-            otherUserIdType: typeof otherParticipant.user
-          });
-
-          // Try multiple query approaches to debug
-          const friendship1 = await Friends.findOne({
-            user: sendId,
-            friend: otherParticipant.user
-          });
+          const cacheKey = [sendId, otherParticipant.user._id.toString()].sort().join(':');
+          const cached = friendshipCache.get(cacheKey);
           
-          const friendship2 = await Friends.findOne({
-            user: otherParticipant.user,
-            friend: sendId
-          });
-          
-          const friendship3 = await Friends.findOne({
-            $or: [
-              { user: sendId, friend: otherParticipant.user },
-              { user: otherParticipant.user, friend: sendId }
-            ]
-          });
+          let areFriends = false;
+          if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+            areFriends = cached.status;
+          } else {
+            // Optimized friendship query with lean
+            const friendship = await Friends.findOne({
+              $or: [
+                { user: sendId, friend: otherParticipant.user._id },
+                { user: otherParticipant.user._id, friend: sendId }
+              ]
+            }).lean();
+            
+            areFriends = !!friendship;
+            friendshipCache.set(cacheKey, {
+              status: areFriends,
+              timestamp: Date.now()
+            });
+          }
 
-          console.log('Friendship query results:', {
-            query1: !!friendship1,
-            query2: !!friendship2,
-            query3: !!friendship3,
-            senderId: sendId,
-            otherUserId: otherParticipant.user
-          });
-
-          const friendship = friendship3;
-
-          if (!friendship) {
-            console.log('Blocking message - users are not friends');
+          if (!areFriends) {
             socket.emit('messageError', { error: 'You must be friends to send messages' });
             return;
-          } else {
-            console.log('Allowing message - users are friends');
           }
         }
         
-        // Create new message
+        // Create new message with optimized save
         const message = new Messages({
           conversation: convId,
           sender: sendId,
@@ -262,39 +253,38 @@ class SocketHandler {
           messageType
         });
         
-        await message.save();
-        
-        // Update conversation's last message
-        await Conversations.findByIdAndUpdate(
-          convId,
-          {
-            lastMessage: message._id,
-            lastMessageAt: new Date()
-          }
-        );
+        // Save message and update conversation in parallel for better performance
+        const [savedMessage] = await Promise.all([
+          message.save(),
+          Conversations.findByIdAndUpdate(
+            convId,
+            {
+              lastMessage: message._id,
+              lastMessageAt: new Date()
+            },
+            { lean: true }
+          )
+        ]);
 
-        // Populate message details
-        await message.populate('sender', 'name email profilePicture');
+        // Populate message details efficiently
+        await savedMessage.populate('sender', 'name email profilePicture');
         
         // Convert message to plain object for socket emission
-        const messageObj = message.toObject();
-        // Ensure conversation ID is included as string for frontend comparison
+        const messageObj = savedMessage.toObject();
         messageObj.conversation = convId.toString();
         
-  
+        // Emit to conversation room
         this.io.to(convId.toString()).emit('newMessage', messageObj);
         
-        // Also emit to participants' personal rooms for notifications
-        if (conversation) {
-          conversation.participants.forEach(participant => {
-            if (participant.user.toString() !== sendId.toString()) {
-              this.io.to(participant.user.toString()).emit('newMessageNotification', {
-                conversationId: convId,
-                message: messageObj
-              });
-            }
-          });
-        }
+        // Emit to other participant's personal room for notifications
+        conversation.participants.forEach(participant => {
+          if (participant.user._id.toString() !== sendId.toString()) {
+            this.io.to(participant.user._id.toString()).emit('newMessageNotification', {
+              conversationId: convId,
+              message: messageObj
+            });
+          }
+        });
         
       } catch (error) {
         console.error('Error sending message:', error);

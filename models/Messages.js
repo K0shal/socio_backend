@@ -64,4 +64,10 @@ messageSchema.pre('save', function(next) {
   next();
 });
 
+// Add indexes for better performance
+messageSchema.index({ conversation: 1, createdAt: -1 });
+messageSchema.index({ conversation: 1, isDeleted: 1, createdAt: -1 });
+messageSchema.index({ sender: 1, createdAt: -1 });
+messageSchema.index({ 'readBy.user': 1 });
+
 module.exports = mongoose.model('Messages', messageSchema);

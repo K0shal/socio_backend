@@ -89,15 +89,16 @@ const getConversations = async (request, h) => {
     })
       .populate('participants.user', 'name email profilePicture')
       .populate('lastMessage')
+      .lean() // Use lean for better performance
       .sort({ lastMessageAt: -1, updatedAt: -1 });
 
-    // Get the other participant for each conversation
+    // Get other participant for each conversation (optimized)
     const conversationsWithOtherUser = conversations.map(conv => {
       const otherParticipant = conv.participants.find(
         p => p.user._id.toString() !== currentUserId.toString()
       );
       return {
-        ...conv.toObject(),
+        ...conv,
         otherUser: otherParticipant?.user || null
       };
     });
@@ -130,32 +131,39 @@ const getMessages = async (request, h) => {
       return h.response({ error: error.details[0].message }).code(400);
     }
 
-    // Check if user is part of the conversation
-    const conversation = await Conversations.findById(conversationId);
+    // Use lean() for better performance and check user participation in one query
+    const conversation = await Conversations.findById(conversationId)
+      .populate('participants.user', 'name email profilePicture')
+      .lean();
+
     if (!conversation) {
       return h.response({ error: 'Conversation not found' }).code(404);
     }
 
     const isParticipant = conversation.participants.some(
-      p => p.user.toString() === currentUserId.toString()
+      p => p.user._id.toString() === currentUserId.toString()
     );
 
     if (!isParticipant) {
       return h.response({ error: 'Unauthorized' }).code(403);
     }
 
-    // Get messages
+    // Get messages with lean() for better performance
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    const messages = await Messages.find({
-      conversation: conversationId,
-      isDeleted: false
-    })
-      .populate('sender', 'name email profilePicture')
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .skip(skip);
+    const [messages, total] = await Promise.all([
+      Messages.find({
+        conversation: conversationId,
+        isDeleted: false
+      })
+        .populate('sender', 'name email profilePicture')
+        .sort({ createdAt: -1 })
+        .limit(parseInt(limit))
+        .skip(skip)
+        .lean(),
+      Messages.countDocuments({ conversation: conversationId, isDeleted: false })
+    ]);
 
-    // Update last read timestamp for current user
+    // Update last read timestamp for current user (optimized)
     await Conversations.updateOne(
       {
         _id: conversationId,
@@ -173,7 +181,7 @@ const getMessages = async (request, h) => {
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
-        total: await Messages.countDocuments({ conversation: conversationId, isDeleted: false })
+        total
       }
     });
 
@@ -230,4 +238,3 @@ module.exports = {
   getMessages,
   getConversation
 };
-
