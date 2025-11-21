@@ -82,26 +82,41 @@ const getFriendRequests = async (request, h) => {
 
     let query = {};
     
-    // if (type === 'received') {
-    //   query.receiver = userId;
-    // } else if (type === 'sent') {
-    //   query.sender = userId;
-    // } else {
+    if (type === 'received') {
+      query.receiver = userId;
+    } else if (type === 'sent') {
+      query.sender = userId;
+    } else {
       query.$or = [
         { receiver: userId },
         { sender: userId }
       ];
-      query.status = 'pending';
-    // }
+    }
 
-    // if (status && status !== 'all' && type !== 'all') {
-    //   query.status = status;
-    // }
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+
     console.log('Friend Requests Query:', query);
+    console.log('User ID:', userId);
+    console.log('Query params:', { status, type });
+    
     const friendRequests = await FriendRequests.find(query)
       .populate('sender', 'name email profilePicture')
       .populate('receiver', 'name email profilePicture')
       .sort({ requestDate: -1 });
+
+    console.log('Found friend requests:', friendRequests.length);
+    friendRequests.forEach((req, index) => {
+      console.log(`Request ${index + 1}:`, {
+        id: req._id,
+        sender: req.sender?._id || req.sender,
+        receiver: req.receiver?._id || req.receiver,
+        status: req.status,
+        isSenderCurrentUser: (req.sender?._id?.toString() || req.sender?.toString()) === userId.toString(),
+        isReceiverCurrentUser: (req.receiver?._id?.toString() || req.receiver?.toString()) === userId.toString()
+      });
+    });
 
     return successResponse(h, {
       friendRequests,
