@@ -8,21 +8,15 @@ const isUserOnline = (userId) => {
   return global.onlineUsers.has(userId.toString());
 };
 
-// -------------------------------
-// Get or Create Conversation
-// -------------------------------
+// Get or Create Conversation with friend check and online status
 const getOrCreateConversation = async (request, h) => {
   try {
     const { userId: otherUserId } = request.params;
     const currentUserId = request.auth.credentials.userId;
 
-    // Validation
-    const { error } = Joi.object({ userId: Joi.string().required() })
-      .validate({ userId: otherUserId });
-
+    const { error } = Joi.object({ userId: Joi.string().required() }).validate({ userId: otherUserId });
     if (error) return h.response({ error: error.details[0].message }).code(400);
-
-    if (currentUserId.toString() === otherUserId)
+    if (currentUserId.toString() === otherUserId) 
       return h.response({ error: 'Cannot create conversation with yourself' }).code(400);
 
     // Must be friends
@@ -32,11 +26,9 @@ const getOrCreateConversation = async (request, h) => {
         { user: otherUserId, friend: currentUserId }
       ]
     });
+    if (!friendship) return h.response({ error: 'You must be friends to start a conversation' }).code(403);
 
-    if (!friendship)
-      return h.response({ error: 'You must be friends to start a conversation' }).code(403);
-
-    // Check if conversation exists
+    // Find existing active conversation
     let conversation = await Conversations.findOne({
       'participants.user': { $all: [currentUserId, otherUserId] },
       isActive: true
@@ -44,6 +36,7 @@ const getOrCreateConversation = async (request, h) => {
       .populate('participants.user', 'name email profilePicture')
       .populate('lastMessage');
 
+    // Create if missing
     if (!conversation) {
       conversation = new Conversations({
         participants: [
@@ -52,7 +45,6 @@ const getOrCreateConversation = async (request, h) => {
         ],
         createdBy: currentUserId
       });
-
       await conversation.save();
       await conversation.populate('participants.user', 'name email profilePicture');
     }
@@ -61,7 +53,6 @@ const getOrCreateConversation = async (request, h) => {
       p => p.user._id.toString() !== currentUserId.toString()
     );
 
-    // ADD ONLINE FLAG HERE
     const otherUser = {
       ...otherParticipant.user.toObject(),
       isOnline: isUserOnline(otherParticipant.user._id)
@@ -80,14 +71,11 @@ const getOrCreateConversation = async (request, h) => {
   }
 };
 
-// -------------------------------
-// Get All Conversations
-// -------------------------------
+// Get all active conversations for a user with online statuses
 const getConversations = async (request, h) => {
   try {
     const currentUserId = request.auth.credentials.userId;
     const { page = 1, limit = 20 } = request.query;
-
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
 
@@ -102,12 +90,11 @@ const getConversations = async (request, h) => {
       .limit(limitNum)
       .lean();
 
-    // Add online flags
+    // Add online flags for other users
     const result = conversations.map(conv => {
       const other = conv.participants.find(
         p => p.user._id.toString() !== currentUserId.toString()
       );
-
       return {
         ...conv,
         otherUser: {
@@ -138,15 +125,12 @@ const getConversations = async (request, h) => {
   }
 };
 
-// -------------------------------
-// Get Messages
-// -------------------------------
+// Get paginated messages for a conversation, verifying authorization
 const getMessages = async (request, h) => {
   try {
     const { conversationId } = request.params;
     const currentUserId = request.auth.credentials.userId;
     const { page = 1, limit = 30 } = request.query;
-
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
 
@@ -156,8 +140,7 @@ const getMessages = async (request, h) => {
       isActive: true
     });
 
-    if (!conversation)
-      return h.response({ error: 'Unauthorized or not found' }).code(404);
+    if (!conversation) return h.response({ error: 'Unauthorized or not found' }).code(404);
 
     const messages = await Messages.find({
       conversation: conversationId,
@@ -190,9 +173,7 @@ const getMessages = async (request, h) => {
   }
 };
 
-// -------------------------------
-// Get Conversation by ID
-// -------------------------------
+// Get a single conversation by ID with other user online status
 const getConversation = async (request, h) => {
   try {
     const { conversationId } = request.params;

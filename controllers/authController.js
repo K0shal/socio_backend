@@ -2,14 +2,24 @@ const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const config = require('../config/config');
-const { authResponse, successResponse, errorResponse, notFoundResponse, unauthorizedResponse, serverErrorResponse } = require('../common');
+const {
+  authResponse,
+  successResponse,
+  errorResponse,
+  notFoundResponse,
+  unauthorizedResponse,
+  serverErrorResponse,
+} = require('../common');
 
 const client = new OAuth2Client(config.GOOGLE_CLIENT_ID);
 
+// Verifies Google Token and creates/returns a user and JWT
 const verifyGoogleToken = async (request, h) => {
   try {
     const { token } = request.payload;
-    
+    if (!token) {
+      return unauthorizedResponse(h, 'Token required');
+    }
 
     const ticket = await client.verifyIdToken({
       idToken: token,
@@ -19,31 +29,36 @@ const verifyGoogleToken = async (request, h) => {
     const payload = ticket.getPayload();
 
     const { email, name, picture } = payload;
+    if (!email) {
+      return unauthorizedResponse(h, 'Invalid token payload');
+    }
+
     let user = await User.findOne({ email });
     if (!user) {
       user = await User.create({
-        name, email, profilePicture: picture
-      })
-
+        name,
+        email,
+        profilePicture: picture,
+      });
     }
 
     const jwtToken = jwt.sign(
       {
         userId: user._id,
-        email: user.email
+        email: user.email,
       },
-      config.JWT_SECRET
+      config.JWT_SECRET,
+      { expiresIn: '7d' } // add expiry for security
     );
 
     return authResponse(h, user, jwtToken);
-
   } catch (error) {
     console.error('Google token verification error:', error);
     return unauthorizedResponse(h, 'Invalid token');
   }
 };
 
-
+// Returns current user profile (without password)
 const getCurrentUser = async (request, h) => {
   try {
     const user = await User.findById(request.auth.credentials.userId).select('-password');
@@ -57,6 +72,7 @@ const getCurrentUser = async (request, h) => {
   }
 };
 
+// Updates user profile fields
 const updateProfile = async (request, h) => {
   try {
     const { name, profilePicture } = request.payload;
@@ -67,20 +83,16 @@ const updateProfile = async (request, h) => {
       return notFoundResponse(h, 'User not found');
     }
 
-
     if (name) user.name = name;
     if (profilePicture !== undefined) user.profilePicture = profilePicture;
 
     await user.save();
-
     return successResponse(h, { user }, 'Profile updated successfully');
   } catch (error) {
     console.error('Update profile error:', error);
     return serverErrorResponse(h, 'Failed to update profile');
   }
 };
-
-
 
 module.exports = {
   verifyGoogleToken,
