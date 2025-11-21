@@ -3,13 +3,11 @@ const Joi = require('joi');
 const { Conversations } = require('../models/index');
 const { successResponse, errorResponse } = require('../common/response');
 
-// Send friend request
 const sendFriendRequest = async (request, h) => {
   try {
     const { receiverId } = request.payload;
     const senderId = request.auth.credentials.userId;
 
-    // Validate input
     const schema = Joi.object({
       receiverId: Joi.string().required()
     });
@@ -19,18 +17,15 @@ const sendFriendRequest = async (request, h) => {
       return errorResponse(h, error.details[0].message, 400);
     }
 
-    // Check if trying to send request to self
     if (senderId.toString() === receiverId) {
       return errorResponse(h, 'Cannot send friend request to yourself', 400);
     }
 
-    // Check if receiver exists
     const receiver = await User.findById(receiverId);
     if (!receiver) {
       return errorResponse(h, 'User not found', 404);
     }
 
-    // Check if already friends
     const existingFriendship = await Friends.findOne({
       $or: [
         { user: senderId, friend: receiverId },
@@ -42,7 +37,6 @@ const sendFriendRequest = async (request, h) => {
       return errorResponse(h, 'Already friends with this user', 400);
     }
 
-    // Check if request already exists
     const existingRequest = await FriendRequests.findOne({
       $or: [
         { sender: senderId, receiver: receiverId },
@@ -54,7 +48,6 @@ const sendFriendRequest = async (request, h) => {
       return errorResponse(h, 'Friend request already exists', 400);
     }
 
-    // Create friend request
     const friendRequest = new FriendRequests({
       sender: senderId,
       receiver: receiverId,
@@ -67,7 +60,6 @@ const sendFriendRequest = async (request, h) => {
       { path: 'receiver', select: 'name email profilePicture' }
     ]);
 
-    // Emit real-time notification to receiver
     const io = request.server.plugins.socket.io;
     io.to(receiverId).emit('friendRequestReceived', {
       requestId: friendRequest._id,
@@ -83,16 +75,13 @@ const sendFriendRequest = async (request, h) => {
   }
 };
 
-// Get friend requests for current user
 const getFriendRequests = async (request, h) => {
   try {
     const userId = request.auth.credentials.userId;
     const { status = 'pending', type = 'received' } = request.query;
 
-    // Build query based on parameters
     let query = {};
     
-    // Filter by type: received (requests sent to user) or sent (requests sent by user)
     // if (type === 'received') {
     //   query.receiver = userId;
     // } else if (type === 'sent') {
@@ -105,10 +94,10 @@ const getFriendRequests = async (request, h) => {
       query.status = 'pending';
     // }
 
-    // Filter by status if specified (only applies when type is not 'all')
-    if (status && status !== 'all' && type !== 'all') {
-      query.status = status;
-    }
+    // if (status && status !== 'all' && type !== 'all') {
+    //   query.status = status;
+    // }
+    console.log('Friend Requests Query:', query);
     const friendRequests = await FriendRequests.find(query)
       .populate('sender', 'name email profilePicture')
       .populate('receiver', 'name email profilePicture')
@@ -126,34 +115,28 @@ const getFriendRequests = async (request, h) => {
   }
 };
 
-// Accept friend request
 const acceptFriendRequest = async (request, h) => {
   try {
     const { requestId } = request.params;
     const userId = request.auth.credentials.userId;
 
-    // Find friend request
     const friendRequest = await FriendRequests.findById(requestId);
     if (!friendRequest) {
       return errorResponse(h, 'Friend request not found', 404);
     }
 
-    // Check if user is receiver of request
     if (friendRequest.receiver.toString() !== userId) {
       return errorResponse(h, 'Unauthorized', 403);
     }
 
-    // Check if request is still pending
     if (friendRequest.status !== 'pending') {
       return errorResponse(h, 'Friend request already processed', 400);
     }
 
-    // Update request status
     friendRequest.status = 'accepted';
     friendRequest.responseDate = new Date();
     await friendRequest.save();
 
-    // Create friendship records (both directions)
     const friendship1 = new Friends({
       user: friendRequest.sender,
       friend: friendRequest.receiver
@@ -166,10 +149,8 @@ const acceptFriendRequest = async (request, h) => {
 
     await Promise.all([friendship1.save(), friendship2.save()]);
 
-    // Populate sender info for notification
     await friendRequest.populate('sender', 'name email profilePicture');
 
-    // Emit real-time notification to sender
     const receiverUser = await User.findById(friendRequest.receiver).select('name email profilePicture');
     const io = request.server.plugins.socket.io;
     io.to(friendRequest.sender.toString()).emit('friendRequestAccepted', {
@@ -186,29 +167,24 @@ const acceptFriendRequest = async (request, h) => {
   }
 };
 
-// Reject friend request
 const rejectFriendRequest = async (request, h) => {
   try {
     const { requestId } = request.params;
     const userId = request.auth.credentials.userId;
 
-    // Find friend request
     const friendRequest = await FriendRequests.findById(requestId);
     if (!friendRequest) {
       return errorResponse(h, 'Friend request not found', 404);
     }
 
-    // Check if user is receiver of request
     if (friendRequest.receiver.toString() !== userId) {
       return errorResponse(h, 'Unauthorized', 403);
     }
 
-    // Check if request is still pending
     if (friendRequest.status !== 'pending') {
       return errorResponse(h, 'Friend request already processed', 400);
     }
 
-    // Update request status
     friendRequest.status = 'rejected';
     friendRequest.responseDate = new Date();
     await friendRequest.save();
@@ -221,13 +197,11 @@ const rejectFriendRequest = async (request, h) => {
   }
 };
 
-// Get friends list
 const getFriends = async (request, h) => {
   try {
     const { userId } = request.params;
     const currentUserId = request.auth.credentials.userId;
 
-    // Get friends for specified user
     const friends = await Friends.find({ user: userId })
       .populate('friend', 'name email profilePicture')
       .sort({ friendshipDate: -1 });
@@ -245,13 +219,11 @@ const getFriends = async (request, h) => {
   }
 };
 
-// Remove friend
 const removeFriend = async (request, h) => {
   try {
     const { friendId } = request.params;
     const userId = request.auth.credentials.userId;
 
-    // Remove friendship records (both directions)
     await Friends.deleteMany({
       $or: [
         { user: userId, friend: friendId },
@@ -259,7 +231,6 @@ const removeFriend = async (request, h) => {
       ]
     });
 
-    // Create a new pending friend request from current user to removed friend
     const existingRequest = await FriendRequests.findOne({
       $or: [
         { sender: userId, receiver: friendId },
@@ -267,18 +238,16 @@ const removeFriend = async (request, h) => {
       ]
     });
 
-    // If there's an existing request, delete it first to avoid unique constraint issues
     if (existingRequest) {
       await FriendRequests.deleteOne({ _id: existingRequest._id });
     }
 
-    // Create new pending friend request
     const newFriendRequest = new FriendRequests({
       sender: userId,
       receiver: friendId,
       status: 'pending',
       requestDate: new Date(),
-      responseDate: undefined // Clear any previous response date
+      responseDate: undefined
     });
 
     await newFriendRequest.save();
@@ -287,7 +256,6 @@ const removeFriend = async (request, h) => {
       { path: 'receiver', select: 'name email profilePicture' }
     ]);
 
-    // Find and deactivate conversations between these users
     await Conversations.updateMany(
       {
         'participants.user': { $all: [userId, friendId] },
@@ -300,17 +268,14 @@ const removeFriend = async (request, h) => {
       }
     );
 
-    // Emit real-time notification to both users
     const io = request.server.plugins.socket.io;
     
-    // Notify removed friend that they have a new friend request
     io.to(friendId).emit('friendRequestReceived', {
       requestId: newFriendRequest._id,
       sender: newFriendRequest.sender,
       message: 'You have a new friend request!'
     });
 
-    // Notify current user that the friendship was removed
     io.to(userId).emit('friendRemoved', {
       friendId: friendId,
       message: 'Friendship has been removed and a new friend request has been sent'
@@ -326,13 +291,11 @@ const removeFriend = async (request, h) => {
   }
 };
 
-// Check friendship status
 const checkFriendshipStatus = async (request, h) => {
   try {
     const { userId } = request.params;
     const currentUserId = request.auth.credentials.userId;
 
-    // Check if they are friends
     const friendship = await Friends.findOne({
       $or: [
         { user: currentUserId, friend: userId },
@@ -340,7 +303,6 @@ const checkFriendshipStatus = async (request, h) => {
       ]
     });
 
-    // Check if there's a pending request
     const friendRequest = await FriendRequests.findOne({
       $or: [
         { sender: currentUserId, receiver: userId, status: 'pending' },
