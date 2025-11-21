@@ -1,6 +1,8 @@
 const { FriendRequests, Friends, User } = require('../models/index');
 const Joi = require('joi');
-   const { Conversations } = require('../models/index');
+const { Conversations } = require('../models/index');
+const { successResponse, errorResponse } = require('../common/response');
+
 // Send friend request
 const sendFriendRequest = async (request, h) => {
   try {
@@ -14,18 +16,18 @@ const sendFriendRequest = async (request, h) => {
 
     const { error } = schema.validate({ receiverId });
     if (error) {
-      return h.response({ error: error.details[0].message }).code(400);
+      return errorResponse(h, error.details[0].message, 400);
     }
 
     // Check if trying to send request to self
     if (senderId.toString() === receiverId) {
-      return h.response({ error: 'Cannot send friend request to yourself' }).code(400);
+      return errorResponse(h, 'Cannot send friend request to yourself', 400);
     }
 
     // Check if receiver exists
     const receiver = await User.findById(receiverId);
     if (!receiver) {
-      return h.response({ error: 'User not found' }).code(404);
+      return errorResponse(h, 'User not found', 404);
     }
 
     // Check if already friends
@@ -37,7 +39,7 @@ const sendFriendRequest = async (request, h) => {
     });
 
     if (existingFriendship) {
-      return h.response({ error: 'Already friends with this user' }).code(400);
+      return errorResponse(h, 'Already friends with this user', 400);
     }
 
     // Check if request already exists
@@ -49,7 +51,7 @@ const sendFriendRequest = async (request, h) => {
     });
 
     if (existingRequest) {
-      return h.response({ error: 'Friend request already exists' }).code(400);
+      return errorResponse(h, 'Friend request already exists', 400);
     }
 
     // Create friend request
@@ -73,14 +75,11 @@ const sendFriendRequest = async (request, h) => {
       message: 'You have a new friend request!'
     });
 
-    return h.response({
-      message: 'Friend request sent successfully',
-      friendRequest
-    }).code(201);
+    return successResponse(h, { friendRequest }, 'Friend request sent successfully', 201);
 
   } catch (error) {
     console.error('Error sending friend request:', error);
-    return h.response({ error: 'Internal server error' }).code(500);
+    return errorResponse(h, 'Internal server error', 500);
   }
 };
 
@@ -88,21 +87,42 @@ const sendFriendRequest = async (request, h) => {
 const getFriendRequests = async (request, h) => {
   try {
     const userId = request.auth.credentials.userId;
+    const { status = 'pending', type = 'received' } = request.query;
 
-    const friendRequests = await FriendRequests.find({
-      receiver: userId,
-      status: 'pending'
-    }).populate('sender', 'name email profilePicture')
+    // Build query based on parameters
+    let query = {};
+    
+    // Filter by type: received (requests sent to user) or sent (requests sent by user)
+    // if (type === 'received') {
+    //   query.receiver = userId;
+    // } else if (type === 'sent') {
+    //   query.sender = userId;
+    // } else {
+      query.$or = [
+        { receiver: userId },
+        { sender: userId }
+      ];
+      query.status = 'pending';
+    // }
+
+    // Filter by status if specified (only applies when type is not 'all')
+    if (status && status !== 'all' && type !== 'all') {
+      query.status = status;
+    }
+    const friendRequests = await FriendRequests.find(query)
+      .populate('sender', 'name email profilePicture')
+      .populate('receiver', 'name email profilePicture')
       .sort({ requestDate: -1 });
 
-    return h.response({
+    return successResponse(h, {
       friendRequests,
-      count: friendRequests.length
-    });
+      count: friendRequests.length,
+      filters: { status, type }
+    }, 'Friend requests retrieved successfully');
 
   } catch (error) {
     console.error('Error getting friend requests:', error);
-    return h.response({ error: 'Internal server error' }).code(500);
+    return errorResponse(h, 'Internal server error', 500);
   }
 };
 
@@ -112,20 +132,20 @@ const acceptFriendRequest = async (request, h) => {
     const { requestId } = request.params;
     const userId = request.auth.credentials.userId;
 
-    // Find the friend request
+    // Find friend request
     const friendRequest = await FriendRequests.findById(requestId);
     if (!friendRequest) {
-      return h.response({ error: 'Friend request not found' }).code(404);
+      return errorResponse(h, 'Friend request not found', 404);
     }
 
-    // Check if the user is the receiver of the request
+    // Check if user is receiver of request
     if (friendRequest.receiver.toString() !== userId) {
-      return h.response({ error: 'Unauthorized' }).code(403);
+      return errorResponse(h, 'Unauthorized', 403);
     }
 
     // Check if request is still pending
     if (friendRequest.status !== 'pending') {
-      return h.response({ error: 'Friend request already processed' }).code(400);
+      return errorResponse(h, 'Friend request already processed', 400);
     }
 
     // Update request status
@@ -158,14 +178,11 @@ const acceptFriendRequest = async (request, h) => {
       message: 'Your friend request was accepted!'
     });
 
-    return h.response({
-      message: 'Friend request accepted successfully',
-      friendship: friendship1
-    });
+    return successResponse(h, { friendship: friendship1 }, 'Friend request accepted successfully');
 
   } catch (error) {
     console.error('Error accepting friend request:', error);
-    return h.response({ error: 'Internal server error' }).code(500);
+    return errorResponse(h, 'Internal server error', 500);
   }
 };
 
@@ -175,20 +192,20 @@ const rejectFriendRequest = async (request, h) => {
     const { requestId } = request.params;
     const userId = request.auth.credentials.userId;
 
-    // Find the friend request
+    // Find friend request
     const friendRequest = await FriendRequests.findById(requestId);
     if (!friendRequest) {
-      return h.response({ error: 'Friend request not found' }).code(404);
+      return errorResponse(h, 'Friend request not found', 404);
     }
 
-    // Check if the user is the receiver of the request
+    // Check if user is receiver of request
     if (friendRequest.receiver.toString() !== userId) {
-      return h.response({ error: 'Unauthorized' }).code(403);
+      return errorResponse(h, 'Unauthorized', 403);
     }
 
     // Check if request is still pending
     if (friendRequest.status !== 'pending') {
-      return h.response({ error: 'Friend request already processed' }).code(400);
+      return errorResponse(h, 'Friend request already processed', 400);
     }
 
     // Update request status
@@ -196,13 +213,11 @@ const rejectFriendRequest = async (request, h) => {
     friendRequest.responseDate = new Date();
     await friendRequest.save();
 
-    return h.response({
-      message: 'Friend request rejected successfully'
-    });
+    return successResponse(h, {}, 'Friend request rejected successfully');
 
   } catch (error) {
     console.error('Error rejecting friend request:', error);
-    return h.response({ error: 'Internal server error' }).code(500);
+    return errorResponse(h, 'Internal server error', 500);
   }
 };
 
@@ -212,21 +227,21 @@ const getFriends = async (request, h) => {
     const { userId } = request.params;
     const currentUserId = request.auth.credentials.userId;
 
-    // Get friends for the specified user
+    // Get friends for specified user
     const friends = await Friends.find({ user: userId })
       .populate('friend', 'name email profilePicture')
       .sort({ friendshipDate: -1 });
 
     const friendList = friends.map(f => f.friend);
 
-    return h.response({
+    return successResponse(h, {
       friends: friendList,
       count: friendList.length
-    });
+    }, 'Friends retrieved successfully');
 
   } catch (error) {
     console.error('Error getting friends:', error);
-    return h.response({ error: 'Internal server error' }).code(500);
+    return errorResponse(h, 'Internal server error', 500);
   }
 };
 
@@ -244,7 +259,7 @@ const removeFriend = async (request, h) => {
       ]
     });
 
-    // Create a new pending friend request from the current user to the removed friend
+    // Create a new pending friend request from current user to removed friend
     const existingRequest = await FriendRequests.findOne({
       $or: [
         { sender: userId, receiver: friendId },
@@ -288,27 +303,26 @@ const removeFriend = async (request, h) => {
     // Emit real-time notification to both users
     const io = request.server.plugins.socket.io;
     
-    // Notify the removed friend that they have a new friend request
+    // Notify removed friend that they have a new friend request
     io.to(friendId).emit('friendRequestReceived', {
       requestId: newFriendRequest._id,
       sender: newFriendRequest.sender,
       message: 'You have a new friend request!'
     });
 
-    // Notify the current user that the friendship was removed
+    // Notify current user that the friendship was removed
     io.to(userId).emit('friendRemoved', {
       friendId: friendId,
       message: 'Friendship has been removed and a new friend request has been sent'
     });
 
-    return h.response({
-      message: 'Friend removed successfully and new friend request sent',
+    return successResponse(h, {
       friendRequest: newFriendRequest
-    });
+    }, 'Friend removed successfully and new friend request sent');
 
   } catch (error) {
     console.error('Error removing friend:', error);
-    return h.response({ error: 'Internal server error' }).code(500);
+    return errorResponse(h, 'Internal server error', 500);
   }
 };
 
@@ -345,16 +359,16 @@ const checkFriendshipStatus = async (request, h) => {
       }
     }
 
-    return h.response({
+    return successResponse(h, {
       status,
       isFriend: status === 'friends',
       requestSent: status === 'request_sent',
       requestReceived: status === 'request_received'
-    });
+    }, 'Friendship status retrieved successfully');
 
   } catch (error) {
     console.error('Error checking friendship status:', error);
-    return h.response({ error: 'Internal server error' }).code(500);
+    return errorResponse(h, 'Internal server error', 500);
   }
 };
 
