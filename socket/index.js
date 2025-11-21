@@ -53,12 +53,18 @@ class SocketHandler {
     });
 
     this.io.on('connection', (socket) => {
+      console.log('🔌 New socket connection attempt:', { socketId: socket.id });
       const userId = socket.data?.userId;
       const userInfo = socket.data?.user;
+      console.log('🔐 Socket authentication result:', { userId, userInfo });
+      
       if (!userId) {
+        console.log('❌ Socket authentication failed - disconnecting');
         socket.disconnect(true);
         return;
       }
+      
+      console.log('✅ Socket authentication successful for user:', userId);
       socket.join(userId);
       
       // Check if this user is already online (multiple tabs/devices)
@@ -108,6 +114,16 @@ class SocketHandler {
   }
 
   setupUserHandlers(socket) {
+    socket.on('getOnlineUsers', () => {
+      console.log('📋 Received getOnlineUsers request from', socket.data.userId);
+      console.log('👥 Current online users map:', this.onlineUsers);
+      const onlineUserIds = Array.from(this.onlineUsers.keys());
+      console.log('📤 Sending online users list:', onlineUserIds);
+      console.log('📤 Total online users count:', onlineUserIds.length);
+      // Send current online users list to requesting socket
+      socket.emit('onlineUsersList', { userIds: onlineUserIds });
+    });
+
     socket.on('joinUser', (userId) => {
       if (!userId) return;
       socket.join(String(userId));
