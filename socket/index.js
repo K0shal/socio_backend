@@ -68,7 +68,6 @@ class SocketHandler {
         
           
         } catch (error) {
-          console.error('Socket authentication error:', error);
           socket.emit('authError', { error: 'Invalid token' });
         }
       });
@@ -150,18 +149,9 @@ class SocketHandler {
             ]
           });
 
-          console.log('Friendship check for join conversation:', {
-            userId: socket.userId,
-            otherUserId: otherParticipant.user,
-            friendshipExists: !!friendship
-          });
-
           if (!friendship) {
-            console.log('Blocking conversation join - users are not friends');
             socket.emit('error', { error: 'You must be friends to join this conversation' });
             return;
-          } else {
-            console.log('Allowing conversation join - users are friends');
           }
         }
 

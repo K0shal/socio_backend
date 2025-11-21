@@ -1,6 +1,6 @@
 const { FriendRequests, Friends, User } = require('../models/index');
 const Joi = require('joi');
-
+   const { Conversations } = require('../models/index');
 // Send friend request
 const sendFriendRequest = async (request, h) => {
   try {
@@ -244,8 +244,35 @@ const removeFriend = async (request, h) => {
       ]
     });
 
+    // Create a new pending friend request from the current user to the removed friend
+    const existingRequest = await FriendRequests.findOne({
+      $or: [
+        { sender: userId, receiver: friendId },
+        { sender: friendId, receiver: userId }
+      ]
+    });
+
+    // If there's an existing request, delete it first to avoid unique constraint issues
+    if (existingRequest) {
+      await FriendRequests.deleteOne({ _id: existingRequest._id });
+    }
+
+    // Create new pending friend request
+    const newFriendRequest = new FriendRequests({
+      sender: userId,
+      receiver: friendId,
+      status: 'pending',
+      requestDate: new Date(),
+      responseDate: undefined // Clear any previous response date
+    });
+
+    await newFriendRequest.save();
+    await newFriendRequest.populate([
+      { path: 'sender', select: 'name email profilePicture' },
+      { path: 'receiver', select: 'name email profilePicture' }
+    ]);
+
     // Find and deactivate conversations between these users
-    const { Conversations } = require('../models/index');
     await Conversations.updateMany(
       {
         'participants.user': { $all: [userId, friendId] },
@@ -261,19 +288,22 @@ const removeFriend = async (request, h) => {
     // Emit real-time notification to both users
     const io = request.server.plugins.socket.io;
     
-    // Notify both users that friendship is removed
+    // Notify the removed friend that they have a new friend request
+    io.to(friendId).emit('friendRequestReceived', {
+      requestId: newFriendRequest._id,
+      sender: newFriendRequest.sender,
+      message: 'You have a new friend request!'
+    });
+
+    // Notify the current user that the friendship was removed
     io.to(userId).emit('friendRemoved', {
       friendId: friendId,
-      message: 'Friendship has been removed'
-    });
-    
-    io.to(friendId).emit('friendRemoved', {
-      friendId: userId,
-      message: 'Friendship has been removed'
+      message: 'Friendship has been removed and a new friend request has been sent'
     });
 
     return h.response({
-      message: 'Friend removed successfully'
+      message: 'Friend removed successfully and new friend request sent',
+      friendRequest: newFriendRequest
     });
 
   } catch (error) {

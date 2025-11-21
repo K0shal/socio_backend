@@ -26,7 +26,6 @@ const registerAuthMiddleware = async (server) => {
           }
         };
       } catch (error) {
-        console.error('JWT validation error:', error);
         return {
           isValid: false,
           credentials: null
