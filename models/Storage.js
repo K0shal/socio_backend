@@ -21,10 +21,6 @@ const storageSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  url: {
-    type: String,
-    required: true
-  },
   uploadedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -40,5 +36,14 @@ const storageSchema = new mongoose.Schema({
     default: Date.now
   }
 });
+
+storageSchema.virtual('url').get(function() {
+  const backendUrl = process.env.BACKEND_URL;
+  return `${backendUrl}${this.path}`;
+});
+
+// Ensure virtuals are included in JSON output
+storageSchema.set('toJSON', { virtuals: true });
+storageSchema.set('toObject', { virtuals: true });
 
 module.exports = mongoose.model('Storage', storageSchema);

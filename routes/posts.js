@@ -1,5 +1,4 @@
 const postController = require('../controllers/postsController');
-const { validatePost } = require('../validators/postValidator');
 
 const routes = [
  
@@ -24,7 +23,7 @@ const routes = [
 
   {
     method: 'POST',
-    path: '/api/posts/',
+    path: '/api/posts',
     handler: postController.createPost,
     options: {
       auth: 'jwt',
@@ -32,7 +31,7 @@ const routes = [
         multipart: true,
         output: 'stream',
         parse: true,
-        maxBytes: 10 * 1024 * 1024, // 10MB
+        maxBytes: 50 * 1024 * 1024, // 50MB to match frontend
       },
     }
   },
@@ -40,7 +39,7 @@ const routes = [
   // Update post
   {
     method: 'PUT',
-    path: '/posts/{postId}',
+    path: '/api/posts/{postId}',
     handler: postController.updatePost,
     options: {
       auth: 'jwt',
@@ -50,7 +49,7 @@ const routes = [
   // Delete post
   {
     method: 'DELETE',
-    path: '/posts/{postId}',
+    path: '/api/posts/{postId}',
     handler: postController.deletePost,
     options: {
       auth: 'jwt',
@@ -60,7 +59,7 @@ const routes = [
   // Like/unlike post
   {
     method: 'POST',
-    path: '/posts/{postId}/like',
+    path: '/api/posts/{postId}/like',
     handler: postController.toggleLike,
     options: {
       auth: 'jwt',
@@ -70,7 +69,7 @@ const routes = [
   // Get user's posts
   {
     method: 'GET',
-    path: '/posts/user/{userId}',
+    path: '/api/posts/user/{userId}',
     handler: postController.getUserPosts,
     options: {
       auth: false,
@@ -80,7 +79,7 @@ const routes = [
   // Upload post media
   {
     method: 'POST',
-    path: '/posts/upload-media',
+    path: '/api/posts/upload-media',
     handler: postController.uploadMedia,
     options: {
       auth: 'jwt',
@@ -88,7 +87,7 @@ const routes = [
         multipart: true,
         output: 'stream',
         parse: true,
-        maxBytes: 10 * 1024 * 1024, // 10MB
+        maxBytes: 50 * 1024 * 1024, // 50MB to match frontend
       }
     }
   },
@@ -96,7 +95,7 @@ const routes = [
   // Share post
   {
     method: 'POST',
-    path: '/posts/{postId}/share',
+    path: '/api/posts/{postId}/share',
     handler: postController.sharePost,
     options: {
       auth: 'jwt',
@@ -106,7 +105,7 @@ const routes = [
   // Get likes for post
   {
     method: 'GET',
-    path: '/posts/{postId}/likes',
+    path: '/api/posts/{postId}/likes',
     handler: postController.getPostLikes,
     options: {
       auth: false,

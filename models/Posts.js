@@ -11,6 +11,11 @@ const postsSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  visibility: {
+    type: String,
+    enum: ['public', 'friends', 'private'],
+    default: 'public'
+  },
   media: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Storage'

@@ -3,8 +3,85 @@ const Likes = require('../models/Likes');
 const Storage = require('../models/Storage');
 const { successResponse, errorResponse } = require('../common/response');
 const { parsePaginationParams, paginate } = require('../common/pagination');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 
-// Get all posts with pagination
+
+const generateUniqueFilename = (originalName) => {
+  const ext = path.extname(originalName);
+  const timestamp = Date.now();
+  const randomString = crypto.randomBytes(16).toString('hex');
+  const uniqueFilename = `${timestamp}_${randomString}${ext}`;
+  console.log('Generating filename:', { originalName, ext, uniqueFilename });
+  return uniqueFilename;
+};
+
+const saveFileAndCreateRecord = async (file, userId) => {
+  try {
+    const uploadsDir = path.join(__dirname, '../uploads');
+    
+    // Create uploads directory if it doesn't exist
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    // Handle different file structures from frontend
+    let fileBuffer, originalName, mimeType;
+    
+  
+    if (file._data) {
+      // Hapi.js file upload structure
+      fileBuffer = file._data;
+      // Extract filename and MIME type from hapi headers
+      if (file.hapi && file.hapi.filename) {
+        originalName = file.hapi.filename;
+      } else {
+        originalName = file.originalname || file.name || 'unknown';
+      }
+      
+      if (file.hapi && file.hapi.headers && file.hapi.headers['content-type']) {
+        mimeType = file.hapi.headers['content-type'];
+      } else {
+        mimeType = file.type || file.mimetype || 'application/octet-stream';
+      }
+    } else if (file.buffer) {
+      // Buffer data (from form-data)
+      fileBuffer = file.buffer;
+      originalName = file.originalname || file.name || 'unknown';
+      mimeType = file.mimetype || 'application/octet-stream';
+    } else {
+      throw new Error('Invalid file format');
+    }
+
+  
+
+    const uniqueFilename = generateUniqueFilename(originalName);
+    const filePath = path.join(uploadsDir, uniqueFilename);
+    
+    // Save file to filesystem
+    fs.writeFileSync(filePath, fileBuffer);
+   
+    const storageData = {
+      filename: uniqueFilename,
+      originalName: originalName,
+      mimeType: mimeType,
+      size: fileBuffer.length,
+      path: `/uploads/${uniqueFilename}`, 
+      fileType: mimeType.startsWith('image/') ? 'image' : 
+                mimeType.startsWith('video/') ? 'video' : 'document',
+      uploadedBy: userId
+    };
+
+    const savedStorage = await Storage.create(storageData);
+    return savedStorage;
+  } catch (error) {
+    console.error('Error saving file:', error);
+    throw error;
+  }
+};
+
+
 const getAllPosts = async (request, h) => {
   try {
     const paginationParams = parsePaginationParams(request.query);
@@ -17,14 +94,14 @@ const getAllPosts = async (request, h) => {
         },
         {
           path: 'media',
-          select: 'url type filename'
+          select: 'filename originalName mimeType size path fileType'
         }
       ])
       .sort({ createdAt: -1 });
 
     const result = await paginate(query, paginationParams);
     
-
+    // Populate likes for each post
     const postsWithLikes = await Promise.all(
       result.data.map(async (post) => {
         const likes = await Likes.find({ post: post._id })
@@ -42,13 +119,12 @@ const getAllPosts = async (request, h) => {
     return successResponse(h, {
       posts: postsWithLikes,
       pagination: result.pagination
-    },'Posts retrieved successfully');
+    }, 'Posts retrieved successfully');
   } catch (error) {
     console.error('Get all posts error:', error);
     return errorResponse(h, 'Failed to retrieve posts', 500);
   }
 };
-
 
 const getPostById = async (request, h) => {
   try {
@@ -56,13 +132,13 @@ const getPostById = async (request, h) => {
     
     const post = await Posts.findById(postId)
       .populate('author', 'name email profilePicture')
-      .populate('media', 'url type filename');
+      .populate('media', 'filename originalName mimeType size path fileType');
 
     if (!post) {
       return errorResponse(h, 'Post not found', 404);
     }
 
-    // Get likes from separate Likes collection
+    // Get likes for the post
     const likes = await Likes.find({ post: postId })
       .populate('user', 'name profilePicture')
       .sort({ likedAt: -1 });
@@ -97,39 +173,38 @@ const createPost = async (request, h) => {
       return errorResponse(h, 'Post content is required', 400);
     }
 
-    // Prepare post data
+    // Handle media files and create storage records
+    const mediaStorageRecords = [];
+    console.log('Media files received:', mediaFiles);
+    
+    // Handle both single file and array of files
+    const filesToProcess = Array.isArray(mediaFiles) ? mediaFiles : (mediaFiles ? [mediaFiles] : []);
+   
+    if (filesToProcess.length > 0) {
+      for (const file of filesToProcess) {
+        try {
+          console.log('Processing file:', file);
+          const storageRecord = await saveFileAndCreateRecord(file, userId);
+          mediaStorageRecords.push(storageRecord._id);
+        } catch (error) {
+          console.error('Error processing file:', error);
+          // Continue with other files even if one fails
+        }
+      }
+    }
+
+    // Prepare post data with storage references
     const postData = {
       author: userId,
       content: content.trim(),
       visibility: visibility,
-      media: []
+      media: mediaStorageRecords // Store array of Storage record IDs
     };
-
-    // Handle media files
-    if (mediaFiles && mediaFiles.length > 0) {
-      const mediaPromises = mediaFiles.map(async (file) => {
-        // Save media file and get reference
-        const mediaData = {
-          filename: file.filename,
-          originalname: file.originalname,
-          mimetype: file.headers['content-type'],
-          size: file.length,
-          url: `/uploads/${file.filename}`,
-          type: file.headers['content-type'].startsWith('image/') ? 'image' : 'video',
-          uploadedBy: userId
-        };
-
-        const savedMedia = await Storage.create(mediaData);
-        return savedMedia._id;
-      });
-
-      postData.media = await Promise.all(mediaPromises);
-    }
 
     // Create new post
     const newPost = await Posts.create(postData);
     
-    // Populate the response
+    // Populate the response with full media details
     await newPost.populate([
       {
         path: 'author',
@@ -137,7 +212,7 @@ const createPost = async (request, h) => {
       },
       {
         path: 'media',
-        select: 'url type filename'
+        select: 'filename originalName mimeType size path fileType'
       }
     ]);
 
@@ -184,7 +259,16 @@ const updatePost = async (request, h) => {
       postId,
       updateData,
       { new: true, runValidators: true }
-    ).populate('author', 'name email profilePicture');
+    ).populate([
+      {
+        path: 'author',
+        select: 'name email profilePicture'
+      },
+      {
+        path: 'media',
+        select: 'filename originalName mimeType size path fileType'
+      }
+    ]);
 
     return successResponse(h, 'Post updated successfully', updatedPost);
   } catch (error) {
@@ -210,6 +294,8 @@ const deletePost = async (request, h) => {
       return errorResponse(h, 'Not authorized to delete this post', 403);
     }
 
+    // TODO: Clean up associated media files if needed
+
     // Delete the post
     await Posts.findByIdAndDelete(postId);
 
@@ -232,7 +318,7 @@ const toggleLike = async (request, h) => {
       return errorResponse(h, 'Post not found', 404);
     }
 
-    // Check if user already liked the post using the separate Likes collection
+    // Check if user already liked the post
     const existingLike = await Likes.findOne({
       user: userId,
       post: postId
@@ -280,7 +366,7 @@ const getUserPosts = async (request, h) => {
         },
         {
           path: 'media',
-          select: 'url type filename'
+          select: 'filename originalName mimeType size path fileType'
         }
       ])
       .sort({ createdAt: -1 });
@@ -312,33 +398,34 @@ const getUserPosts = async (request, h) => {
   }
 };
 
-// Upload post media
+// Upload post media (standalone upload)
 const uploadMedia = async (request, h) => {
   try {
     const userId = request.auth.credentials.userId;
     const mediaFiles = request.payload.media;
 
-    if (!mediaFiles || mediaFiles.length === 0) {
+    console.log('Upload media - files received:', mediaFiles);
+
+    if (!mediaFiles) {
       return errorResponse(h, 'No media files provided', 400);
     }
 
-    const mediaPromises = mediaFiles.map(async (file) => {
-      const mediaData = {
-        filename: file.filename,
-        originalname: file.originalname,
-        mimetype: file.headers['content-type'],
-        size: file.length,
-        url: `/uploads/${file.filename}`,
-        type: file.headers['content-type'].startsWith('image/') ? 'image' : 'video',
-        uploadedBy: userId
-      };
+    // Handle both single file and array of files
+    const filesToProcess = Array.isArray(mediaFiles) ? mediaFiles : [mediaFiles];
+    console.log('Upload media - files to process:', filesToProcess.length);
 
-      return await Storage.create(mediaData);
-    });
+    const mediaRecords = [];
+    for (const file of filesToProcess) {
+      try {
+        console.log('Upload media - processing file:', file);
+        const storageRecord = await saveFileAndCreateRecord(file, userId);
+        mediaRecords.push(storageRecord);
+      } catch (error) {
+        console.error('Error uploading file:', error);
+      }
+    }
 
-    const savedMedia = await Promise.all(mediaPromises);
-
-    return successResponse(h, 'Media uploaded successfully', savedMedia, 201);
+    return successResponse(h, 'Media uploaded successfully', mediaRecords, 201);
   } catch (error) {
     console.error('Upload media error:', error);
     return errorResponse(h, 'Failed to upload media', 500);
@@ -358,8 +445,7 @@ const sharePost = async (request, h) => {
       return errorResponse(h, 'Post not found', 404);
     }
 
-    // Here you would implement sharing logic (e.g., create share record, send notifications, etc.)
-    // For now, just return success with share info
+    // TODO: Implement sharing logic (e.g., create share record, send notifications)
     
     return successResponse(h, 'Post shared successfully', {
       postId: postId,
@@ -384,7 +470,7 @@ const getPostLikes = async (request, h) => {
       return errorResponse(h, 'Post not found', 404);
     }
 
-    // Get likes from separate Likes collection
+    // Get likes for the post
     const likes = await Likes.find({ post: postId })
       .populate('user', 'name profilePicture')
       .sort({ likedAt: -1 });

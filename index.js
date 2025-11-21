@@ -1,6 +1,7 @@
 const Hapi = require('@hapi/hapi');
 const http = require('http');
 const socketIo = require('socket.io');
+const path = require('path');
 const connectDB = require('./config/database');
 const allRoutes = require('./routes/index');
 const SocketHandler = require('./socket/index');
@@ -9,12 +10,14 @@ const { registerAuthMiddleware } = require('./middleware/auth');
 const init = async () => {
 
   const server = Hapi.server({
-    port: process.env.PORT || 3000,
+    port: process.env.PORT || 5000,
     host: 'localhost',
      routes: {
         cors: {
           origin: ['*'],
-        }
+          
+        },
+        state: { parse: false } 
     }
   });
 
@@ -30,9 +33,26 @@ const init = async () => {
       methods: ["GET", "POST", "PUT", "PATCH"]
     }
   });
-
+  await server.register({
+    plugin: require('@hapi/inert'),
+  });
 
    connectDB();
+
+  // Serve static files from uploads directory
+
+
+  server.route({
+    method: 'GET',
+    path: '/uploads/{param*}',
+    handler: (request, h) => {
+      const filePath = request.params.param;
+      return h.file(path.join(__dirname, 'uploads', filePath));
+    },
+    options: {
+      auth: false, 
+    }
+  });
 
 
   server.route(allRoutes);
