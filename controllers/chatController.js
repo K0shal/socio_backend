@@ -1,28 +1,31 @@
 const { Conversations, Messages, User, Friends } = require('../models/index');
 const Joi = require('joi');
+const mongoose = require('mongoose');
 
-// Get or create conversation between two users
+// Helper: check if user is online
+const isUserOnline = (userId) => {
+  if (!global.onlineUsers) return false;
+  return global.onlineUsers.has(userId.toString());
+};
+
+// -------------------------------
+// Get or Create Conversation
+// -------------------------------
 const getOrCreateConversation = async (request, h) => {
   try {
     const { userId: otherUserId } = request.params;
     const currentUserId = request.auth.credentials.userId;
 
-    // Validate input
-    const schema = Joi.object({
-      userId: Joi.string().required()
-    });
+    // Validation
+    const { error } = Joi.object({ userId: Joi.string().required() })
+      .validate({ userId: otherUserId });
 
-    const { error } = schema.validate({ userId: otherUserId });
-    if (error) {
-      return h.response({ error: error.details[0].message }).code(400);
-    }
+    if (error) return h.response({ error: error.details[0].message }).code(400);
 
-    // Check if trying to chat with self
-    if (currentUserId.toString() === otherUserId) {
+    if (currentUserId.toString() === otherUserId)
       return h.response({ error: 'Cannot create conversation with yourself' }).code(400);
-    }
 
-    // Check if they are friends
+    // Must be friends
     const friendship = await Friends.findOne({
       $or: [
         { user: currentUserId, friend: otherUserId },
@@ -30,22 +33,17 @@ const getOrCreateConversation = async (request, h) => {
       ]
     });
 
-    if (!friendship) {
+    if (!friendship)
       return h.response({ error: 'You must be friends to start a conversation' }).code(403);
-    }
 
-    // Check if conversation already exists
-    // Find conversations where both users are participants
-    const conversations = await Conversations.find({
+    // Check if conversation exists
+    let conversation = await Conversations.findOne({
       'participants.user': { $all: [currentUserId, otherUserId] },
       isActive: true
-    }).populate('participants.user', 'name email profilePicture')
+    })
+      .populate('participants.user', 'name email profilePicture')
       .populate('lastMessage');
-    
-    // Filter to ensure it has exactly 2 participants (one-on-one chat)
-    let conversation = conversations.find(conv => conv.participants.length === 2);
 
-    // If conversation doesn't exist, create it
     if (!conversation) {
       conversation = new Conversations({
         participants: [
@@ -59,29 +57,39 @@ const getOrCreateConversation = async (request, h) => {
       await conversation.populate('participants.user', 'name email profilePicture');
     }
 
-    // Get the other participant
     const otherParticipant = conversation.participants.find(
       p => p.user._id.toString() !== currentUserId.toString()
     );
 
+    // ADD ONLINE FLAG HERE
+    const otherUser = {
+      ...otherParticipant.user.toObject(),
+      isOnline: isUserOnline(otherParticipant.user._id)
+    };
+
     return h.response({
       conversation: {
         ...conversation.toObject(),
-        otherUser: otherParticipant?.user || null
-      },
-      message: 'Conversation retrieved successfully'
+        otherUser
+      }
     });
 
-  } catch (error) {
-    console.error('Error getting or creating conversation:', error);
+  } catch (err) {
+    console.error('Get/Create conversation error:', err);
     return h.response({ error: 'Internal server error' }).code(500);
   }
 };
 
-// Get all conversations for current user
+// -------------------------------
+// Get All Conversations
+// -------------------------------
 const getConversations = async (request, h) => {
   try {
     const currentUserId = request.auth.credentials.userId;
+    const { page = 1, limit = 20 } = request.query;
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
 
     const conversations = await Conversations.find({
       'participants.user': currentUserId,
@@ -89,109 +97,102 @@ const getConversations = async (request, h) => {
     })
       .populate('participants.user', 'name email profilePicture')
       .populate('lastMessage')
-      .lean() // Use lean for better performance
-      .sort({ lastMessageAt: -1, updatedAt: -1 });
+      .sort({ lastMessageAt: -1, updatedAt: -1 })
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum)
+      .lean();
 
-    // Get other participant for each conversation (optimized)
-    const conversationsWithOtherUser = conversations.map(conv => {
-      const otherParticipant = conv.participants.find(
+    // Add online flags
+    const result = conversations.map(conv => {
+      const other = conv.participants.find(
         p => p.user._id.toString() !== currentUserId.toString()
       );
+
       return {
         ...conv,
-        otherUser: otherParticipant?.user || null
+        otherUser: {
+          ...other.user,
+          isOnline: isUserOnline(other.user._id)
+        }
       };
     });
 
-    return h.response({
-      conversations: conversationsWithOtherUser,
-      count: conversationsWithOtherUser.length
+    const total = await Conversations.countDocuments({
+      'participants.user': currentUserId,
+      isActive: true
     });
 
-  } catch (error) {
-    console.error('Error getting conversations:', error);
+    return h.response({
+      conversations: result,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: Math.ceil(total / limitNum)
+      }
+    });
+
+  } catch (err) {
+    console.error('Get conversations error:', err);
     return h.response({ error: 'Internal server error' }).code(500);
   }
 };
 
-// Get messages for a conversation
+// -------------------------------
+// Get Messages
+// -------------------------------
 const getMessages = async (request, h) => {
   try {
     const { conversationId } = request.params;
     const currentUserId = request.auth.credentials.userId;
-    const { page = 1, limit = 50 } = request.query;
+    const { page = 1, limit = 30 } = request.query;
 
-    // Validate input
-    const schema = Joi.object({
-      conversationId: Joi.string().required()
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+
+    const conversation = await Conversations.findOne({
+      _id: conversationId,
+      'participants.user': currentUserId,
+      isActive: true
     });
 
-    const { error } = schema.validate({ conversationId });
-    if (error) {
-      return h.response({ error: error.details[0].message }).code(400);
-    }
+    if (!conversation)
+      return h.response({ error: 'Unauthorized or not found' }).code(404);
 
-    // Use lean() for better performance and check user participation in one query
-    const conversation = await Conversations.findById(conversationId)
-      .populate('participants.user', 'name email profilePicture')
+    const messages = await Messages.find({
+      conversation: conversationId,
+      isDeleted: false
+    })
+      .populate('sender', 'name email profilePicture')
+      .sort({ createdAt: -1 })
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum)
       .lean();
 
-    if (!conversation) {
-      return h.response({ error: 'Conversation not found' }).code(404);
-    }
-
-    const isParticipant = conversation.participants.some(
-      p => p.user._id.toString() === currentUserId.toString()
-    );
-
-    if (!isParticipant) {
-      return h.response({ error: 'Unauthorized' }).code(403);
-    }
-
-    // Get messages with lean() for better performance
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const [messages, total] = await Promise.all([
-      Messages.find({
-        conversation: conversationId,
-        isDeleted: false
-      })
-        .populate('sender', 'name email profilePicture')
-        .sort({ createdAt: -1 })
-        .limit(parseInt(limit))
-        .skip(skip)
-        .lean(),
-      Messages.countDocuments({ conversation: conversationId, isDeleted: false })
-    ]);
-
-    // Update last read timestamp for current user (optimized)
-    await Conversations.updateOne(
-      {
-        _id: conversationId,
-        'participants.user': currentUserId
-      },
-      {
-        $set: {
-          'participants.$.lastRead': new Date()
-        }
-      }
-    );
+    const total = await Messages.countDocuments({
+      conversation: conversationId,
+      isDeleted: false
+    });
 
     return h.response({
-      messages: messages.reverse(), // Reverse to show oldest first
+      messages: messages.reverse(),
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: Math.ceil(total / limitNum)
       }
     });
 
-  } catch (error) {
-    console.error('Error getting messages:', error);
+  } catch (err) {
+    console.error('Get messages error:', err);
     return h.response({ error: 'Internal server error' }).code(500);
   }
 };
 
-// Get conversation by ID
+// -------------------------------
+// Get Conversation by ID
+// -------------------------------
 const getConversation = async (request, h) => {
   try {
     const { conversationId } = request.params;
@@ -199,35 +200,27 @@ const getConversation = async (request, h) => {
 
     const conversation = await Conversations.findById(conversationId)
       .populate('participants.user', 'name email profilePicture')
-      .populate('lastMessage');
+      .populate('lastMessage')
+      .lean();
 
-    if (!conversation) {
-      return h.response({ error: 'Conversation not found' }).code(404);
-    }
+    if (!conversation) return h.response({ error: 'Not found' }).code(404);
 
-    // Check if user is part of the conversation
-    const isParticipant = conversation.participants.some(
-      p => p.user._id.toString() === currentUserId.toString()
-    );
-
-    if (!isParticipant) {
-      return h.response({ error: 'Unauthorized' }).code(403);
-    }
-
-    // Get the other participant
-    const otherParticipant = conversation.participants.find(
+    const other = conversation.participants.find(
       p => p.user._id.toString() !== currentUserId.toString()
     );
 
     return h.response({
       conversation: {
-        ...conversation.toObject(),
-        otherUser: otherParticipant?.user || null
+        ...conversation,
+        otherUser: {
+          ...other.user,
+          isOnline: isUserOnline(other.user._id)
+        }
       }
     });
 
-  } catch (error) {
-    console.error('Error getting conversation:', error);
+  } catch (err) {
+    console.error('Get conversation error:', err);
     return h.response({ error: 'Internal server error' }).code(500);
   }
 };

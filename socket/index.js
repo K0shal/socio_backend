@@ -1,3 +1,4 @@
+// socket/index.js
 const { Conversations, Messages, User, Friends } = require('../models/index');
 const jwt = require('jsonwebtoken');
 const config = require('../config/config');
@@ -5,128 +6,161 @@ const config = require('../config/config');
 class SocketHandler {
   constructor(io) {
     this.io = io;
-    this.onlineUsers = new Map(); // Map of userId -> Set of socketIds
+    // Map<userId, Set<socketId>>
+    this.onlineUsers = new Map();
     this.setupEventHandlers();
   }
 
+  // helper to broadcast the latest online user ids to everyone
+  broadcastOnlineUsers() {
+    try {
+      const onlineUserIds = Array.from(this.onlineUsers.keys());
+      this.io.emit('onlineUsersList', { userIds: onlineUserIds });
+    } catch (err) {
+      console.error('Error broadcasting online users:', err);
+    }
+  }
+
   setupEventHandlers() {
-    // Add authentication middleware
+    // authentication middleware
     this.io.use(async (socket, next) => {
       try {
-        const token = socket.handshake.auth.token;
-        
-        if (!token) {
-          return next(new Error('Authentication required'));
-        }
+        const token = socket.handshake?.auth?.token || socket.handshake?.query?.token;
+        if (!token) return next(new Error('Authentication required'));
 
-        // Verify JWT token
         const decoded = jwt.verify(token, config.JWT_SECRET);
-        
-        // Get user details
-        const user = await User.findById(decoded.userId).select('-password');
-        
-        if (!user) {
-          return next(new Error('User not found'));
-        }
+        if (!decoded || !decoded.userId) return next(new Error('Invalid token payload'));
 
-        // Attach user to socket
-        socket.userId = user._id;
-        socket.user = user;
-        
-        next();
-      } catch (error) {
-        next(new Error('Invalid token'));
+        const user = await User.findById(decoded.userId).select('-password').lean();
+        if (!user) return next(new Error('User not found'));
+
+        // Attach user to socket (use socket.data for compatibility)
+        socket.data.userId = String(user._id);
+        socket.data.user = {
+          id: String(user._id),
+          email: user.email,
+          name: user.name,
+          profilePicture: user.profilePicture,
+        };
+
+        return next();
+      } catch (err) {
+        // provide helpful message for client; avoid leaking sensitive info
+        return next(new Error('Invalid token'));
       }
     });
 
     this.io.on('connection', (socket) => {
-      console.log('✅ [SOCKET] User connected:', socket.user.email, 'Socket ID:', socket.id);
-      
-      // Join their personal room
-      socket.join(socket.user._id.toString());
-      
-      // Track online status
-      if (!this.onlineUsers.has(socket.user._id.toString())) {
-        this.onlineUsers.set(socket.user._id.toString(), new Set());
-      }
-      this.onlineUsers.get(socket.user._id.toString()).add(socket.id);
-      
-      // Emit online status to all (friends will filter on frontend)
-      // Also send list of currently online users to the newly connected user
-      const onlineUserIds = Array.from(this.onlineUsers.keys());
-   
-      socket.emit('onlineUsersList', { userIds: onlineUserIds });
-      
-      // Emit online status to all users
-      this.io.emit('userOnline', { userId: socket.user._id.toString() });
-      
-      socket.emit('authenticated', { 
-        message: 'Authentication successful',
-        user: {
-          id: socket.user._id,
-          email: socket.user.email,
-          name: socket.user.name,
-          profilePicture: socket.user.profilePicture
+      try {
+        const userId = socket.data?.userId;
+        const userInfo = socket.data?.user;
+
+        if (!userId) {
+          // this should not happen because middleware rejects unauthenticated sockets
+          console.warn('[SOCKET] connection without userId (should be blocked by middleware)');
+          socket.disconnect(true);
+          return;
         }
-      });
-      
-      this.setupUserHandlers(socket);
-      this.setupConversationHandlers(socket);
-      this.setupMessageHandlers(socket);
-      this.setupTypingHandlers(socket);
-      this.setupFriendHandlers(socket);
-      
-      socket.on('disconnect', () => {
-        
-        // Handle offline status
-        if (socket.userId) {
-          const userId = socket.userId.toString();
-          const userSockets = this.onlineUsers.get(userId);
-          
-          if (userSockets) {
-            userSockets.delete(socket.id);
-            
-            // If no more sockets for this user, mark as offline
-            if (userSockets.size === 0) {
-              this.onlineUsers.delete(userId);
-       
-              this.io.emit('userOffline', { userId });
+
+        console.log('✅ [SOCKET] User connected:', userInfo?.email || userId, 'Socket ID:', socket.id);
+
+        // Join personal room for direct notifications (useful for notifications)
+        socket.join(userId);
+
+        // Track online status (support multiple tabs/devices)
+        if (!this.onlineUsers.has(userId)) {
+          this.onlineUsers.set(userId, new Set());
+        }
+        this.onlineUsers.get(userId).add(socket.id);
+
+        // Immediately send authentication confirmation to the connecting socket
+        socket.emit('authenticated', {
+          message: 'Authentication successful',
+          user: userInfo,
+        });
+
+        // Broadcast presence events:
+        // - Notify everyone that this user is online (userOnline)
+        // - Broadcast updated online user list
+        this.io.emit('userOnline', { userId });
+        this.broadcastOnlineUsers();
+
+        // Setup per-socket handlers
+        this.setupUserHandlers(socket);
+        this.setupConversationHandlers(socket);
+        this.setupMessageHandlers(socket);
+        this.setupTypingHandlers(socket);
+        this.setupFriendHandlers(socket);
+
+        socket.on('disconnect', () => {
+          try {
+            // remove socket id from map
+            const sId = socket.id;
+            if (!userId) return;
+
+            const socketsForUser = this.onlineUsers.get(userId);
+            if (socketsForUser) {
+              socketsForUser.delete(sId);
+
+              if (socketsForUser.size === 0) {
+                this.onlineUsers.delete(userId);
+
+                // Broadcast that user went offline
+                this.io.emit('userOffline', { userId });
+                this.broadcastOnlineUsers();
+              } else {
+                // update list even if still present (though same list)
+                this.broadcastOnlineUsers();
+              }
             }
+            console.log('❌ [SOCKET] Disconnected:', userInfo?.email || userId, 'Socket ID:', sId);
+          } catch (err) {
+            console.error('Error during disconnect handling:', err);
           }
-        }
-      });
+        });
+      } catch (err) {
+        console.error('Unhandled error in connection handler:', err);
+      }
     });
   }
 
   setupUserHandlers(socket) {
-   
+    // optional: allow client to explicitly join rooms (backwards compatibility)
     socket.on('joinUser', (userId) => {
-      socket.join(userId);
-   
+      try {
+        if (!userId) return;
+        socket.join(String(userId));
+        // Optionally confirm
+        socket.emit('joinedUserRoom', { userId: String(userId) });
+      } catch (err) {
+        console.error('joinUser error:', err);
+      }
     });
   }
 
   setupConversationHandlers(socket) {
-    // Join conversation room
     socket.on('joinConversation', async (data) => {
       try {
-        if (!socket.userId) {
+        if (!socket.data?.userId) {
           socket.emit('error', { error: 'Authentication required' });
           return;
         }
 
-        const { conversationId } = data;
-        const convId = conversationId?.toString() || conversationId;
-        
-        // Verify user is part of conversation
-        const conversation = await Conversations.findById(convId);
+        const { conversationId } = data || {};
+        const convId = conversationId?.toString();
+        if (!convId) {
+          socket.emit('error', { error: 'Invalid conversationId' });
+          return;
+        }
+
+        const conversation = await Conversations.findById(convId).lean();
         if (!conversation) {
           socket.emit('error', { error: 'Conversation not found' });
           return;
         }
 
-        const isParticipant = conversation.participants.some(
-          p => p.user.toString() === socket.userId.toString()
+        const isParticipant = (conversation.participants || []).some(
+          (p) => String(p.user) === String(socket.data.userId)
         );
 
         if (!isParticipant) {
@@ -134,18 +168,18 @@ class SocketHandler {
           return;
         }
 
-        // Check if participants are still friends
-        const otherParticipant = conversation.participants.find(
-          p => p.user.toString() !== socket.userId.toString()
+        // Optional: check friendship status (if your app requires friends to message)
+        const otherParticipant = (conversation.participants || []).find(
+          (p) => String(p.user) !== String(socket.data.userId)
         );
-        
+
         if (otherParticipant) {
           const friendship = await Friends.findOne({
             $or: [
-              { user: socket.userId, friend: otherParticipant.user },
-              { user: otherParticipant.user, friend: socket.userId }
-            ]
-          });
+              { user: socket.data.userId, friend: otherParticipant.user },
+              { user: otherParticipant.user, friend: socket.data.userId },
+            ],
+          }).lean();
 
           if (!friendship) {
             socket.emit('error', { error: 'You must be friends to join this conversation' });
@@ -153,189 +187,197 @@ class SocketHandler {
           }
         }
 
-        socket.join(convId.toString());
-       
-        
-        // Confirm join to client
-        socket.emit('joinedConversation', { conversationId: convId.toString() });
-      } catch (error) {
-        console.error('Error joining conversation:', error);
+        socket.join(convId);
+        socket.emit('joinedConversation', { conversationId: convId });
+      } catch (err) {
+        console.error('Error joining conversation:', err);
         socket.emit('error', { error: 'Failed to join conversation' });
       }
     });
 
-    // Leave conversation room
     socket.on('leaveConversation', (data) => {
-      const { conversationId } = data;
-      const convId = conversationId?.toString() || conversationId;
-      socket.leave(convId.toString());
-    
+      try {
+        const convId = data?.conversationId?.toString();
+        if (convId) socket.leave(convId);
+        socket.emit('leftConversation', { conversationId: convId });
+      } catch (err) {
+        console.error('Error leaving conversation:', err);
+      }
     });
   }
 
   setupMessageHandlers(socket) {
-    // Cache for friendship status to reduce DB queries
+    // Simple in-memory friendship cache to reduce repeated DB calls per socket lifetime
     const friendshipCache = new Map();
-    const CACHE_TTL = 30000; // 30 seconds
+    const CACHE_TTL = 30 * 1000; // 30s
 
-    socket.on('sendMessage', async (data) => {
+    socket.on('sendMessage', async (data, ack) => {
       try {
-        // Check if user is authenticated
-        if (!socket.userId) {
+        if (!socket.data?.userId) {
+          if (typeof ack === 'function') ack({ success: false, error: 'Authentication required' });
           socket.emit('messageError', { error: 'Authentication required' });
           return;
         }
 
-        const { conversationId, senderId, content, messageType = 'text' } = data;
-        const convId = conversationId?.toString() || conversationId;
-        const sendId = senderId?.toString() || senderId;
-        
-        // Verify user is part of conversation (optimized query with lean)
+        const { conversationId, senderId, content, messageType = 'text' } = data || {};
+        const convId = conversationId?.toString();
+        const sendId = senderId?.toString();
+
+        if (!convId || !sendId) {
+          if (typeof ack === 'function') ack({ success: false, error: 'Invalid payload' });
+          socket.emit('messageError', { error: 'Invalid payload' });
+          return;
+        }
+
+        // load conversation and populate minimal sender info
         const conversation = await Conversations.findById(convId)
           .populate('participants.user', 'name email profilePicture')
           .lean();
-        
+
         if (!conversation) {
+          if (typeof ack === 'function') ack({ success: false, error: 'Conversation not found' });
           socket.emit('messageError', { error: 'Conversation not found' });
           return;
         }
 
-        const isParticipant = conversation.participants.some(
-          p => p.user._id.toString() === sendId.toString()
+        const isParticipant = (conversation.participants || []).some(
+          (p) => String(p.user._id || p.user) === String(sendId)
         );
 
         if (!isParticipant) {
+          if (typeof ack === 'function') ack({ success: false, error: 'Unauthorized' });
           socket.emit('messageError', { error: 'Unauthorized to send message in this conversation' });
           return;
         }
 
-        // Check if participants are still friends (with caching)
-        const otherParticipant = conversation.participants.find(
-          p => p.user._id.toString() !== sendId.toString()
+        // check friendship (with cache)
+        const otherParticipant = (conversation.participants || []).find(
+          (p) => String(p.user._id || p.user) !== String(sendId)
         );
-        
+
         if (otherParticipant) {
-          const cacheKey = [sendId, otherParticipant.user._id.toString()].sort().join(':');
-          const cached = friendshipCache.get(cacheKey);
-          
+          const pairKey = [sendId, String(otherParticipant.user._id || otherParticipant.user)].sort().join(':');
+          const cached = friendshipCache.get(pairKey);
           let areFriends = false;
+
           if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
             areFriends = cached.status;
           } else {
-            // Optimized friendship query with lean
             const friendship = await Friends.findOne({
               $or: [
-                { user: sendId, friend: otherParticipant.user._id },
-                { user: otherParticipant.user._id, friend: sendId }
-              ]
+                { user: sendId, friend: otherParticipant.user._id || otherParticipant.user },
+                { user: otherParticipant.user._id || otherParticipant.user, friend: sendId },
+              ],
             }).lean();
-            
             areFriends = !!friendship;
-            friendshipCache.set(cacheKey, {
-              status: areFriends,
-              timestamp: Date.now()
-            });
+            friendshipCache.set(pairKey, { status: areFriends, timestamp: Date.now() });
           }
 
           if (!areFriends) {
+            if (typeof ack === 'function') ack({ success: false, error: 'You must be friends to send messages' });
             socket.emit('messageError', { error: 'You must be friends to send messages' });
             return;
           }
         }
-        
-        // Create new message with optimized save
+
+        // create and save message
         const message = new Messages({
           conversation: convId,
           sender: sendId,
           content,
-          messageType
+          messageType,
         });
-        
-        // Save message and update conversation in parallel for better performance
+
         const [savedMessage] = await Promise.all([
           message.save(),
           Conversations.findByIdAndUpdate(
             convId,
-            {
-              lastMessage: message._id,
-              lastMessageAt: new Date()
-            },
+            { lastMessage: message._id, lastMessageAt: new Date() },
             { lean: true }
-          )
+          ),
         ]);
 
-        // Populate message details efficiently
+        // populate sender
         await savedMessage.populate('sender', 'name email profilePicture');
-        
-        // Convert message to plain object for socket emission
+
         const messageObj = savedMessage.toObject();
         messageObj.conversation = convId.toString();
-        
-        // Emit to conversation room
+
+        // emit to conversation room
         this.io.to(convId.toString()).emit('newMessage', messageObj);
-        
-        // Emit to other participant's personal room for notifications
-        conversation.participants.forEach(participant => {
-          if (participant.user._id.toString() !== sendId.toString()) {
-            this.io.to(participant.user._id.toString()).emit('newMessageNotification', {
+
+        // notify other participants in their personal rooms
+        (conversation.participants || []).forEach((participant) => {
+          const participantId = String(participant.user._id || participant.user);
+          if (participantId !== String(sendId)) {
+            this.io.to(participantId).emit('newMessageNotification', {
               conversationId: convId,
-              message: messageObj
+              message: messageObj,
             });
           }
         });
-        
-      } catch (error) {
-        console.error('Error sending message:', error);
-        socket.emit('messageError', { error: 'Failed to send message' });
+
+        if (typeof ack === 'function') ack({ success: true, message: messageObj });
+      } catch (err) {
+        console.error('Error sending message:', err);
+        try {
+          socket.emit('messageError', { error: 'Failed to send message' });
+          if (typeof ack === 'function') ack({ success: false, error: 'Failed to send message' });
+        } catch (e) {
+          console.error('Ack/send fallback error:', e);
+        }
       }
     });
 
-    // Handle marking messages as read
     socket.on('markAsRead', async (data) => {
       try {
-        // Check if user is authenticated
-        if (!socket.userId) {
+        if (!socket.data?.userId) {
           socket.emit('messageError', { error: 'Authentication required' });
           return;
         }
 
-        const { messageId, userId } = data;
-        
-        await Messages.findByIdAndUpdate(
-          messageId,
-          {
-            $addToSet: {
-              readBy: { user: userId, readAt: new Date() }
-            }
-          }
-        );
+        const { messageId, conversationId } = data || {};
+        if (!messageId) return;
 
-        // Notify other participants that message was read
-        socket.to(data.conversationId).emit('messageRead', { messageId, userId });
-        
-      } catch (error) {
-        console.error('Error marking message as read:', error);
+        await Messages.findByIdAndUpdate(messageId, {
+          $addToSet: { readBy: { user: socket.data.userId, readAt: new Date() } },
+        });
+
+        socket.to(String(conversationId)).emit('messageRead', { messageId, userId: socket.data.userId });
+      } catch (err) {
+        console.error('Error marking message read:', err);
       }
     });
   }
 
   setupTypingHandlers(socket) {
-    // Handle typing indicators
     socket.on('typing', (data) => {
-      // Check if user is authenticated
-      if (!socket.userId) {
-        socket.emit('messageError', { error: 'Authentication required' });
-        return;
-      }
+      try {
+        if (!socket.data?.userId) {
+          socket.emit('messageError', { error: 'Authentication required' });
+          return;
+        }
 
-      const { conversationId, userId, isTyping } = data;
-      const convId = conversationId?.toString() || conversationId;
-      socket.to(convId).emit('userTyping', { userId, isTyping });
+        const { conversationId, userId, isTyping } = data || {};
+        if (!conversationId) return;
+
+        // emit typing to the conversation room (except sender)
+        socket.to(String(conversationId)).emit('userTyping', { userId, isTyping });
+      } catch (err) {
+        console.error('Typing handler error:', err);
+      }
     });
   }
 
   setupFriendHandlers(socket) {
-   
+    // placeholder for friend-specific events (friend add/remove notifications, etc.)
+    socket.on('removeFriend', (data) => {
+      try {
+        // implement as needed: validate, update DB, emit friendRemoved, etc.
+      } catch (err) {
+        console.error('removeFriend handler error:', err);
+      }
+    });
   }
 }
 
