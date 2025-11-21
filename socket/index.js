@@ -6,6 +6,7 @@ class SocketHandler {
   constructor(io) {
     this.io = io;
     this.onlineUsers = new Map();
+    this.activeConversations = new Map(); // Track users actively viewing conversations
     this._broadcastTimer = null;
     this._BROADCAST_DEBOUNCE_MS = 100;
     this.setupEventHandlers();
@@ -109,6 +110,8 @@ class SocketHandler {
           }
           this.broadcastOnlineUsersDebounced();
         }
+        // Clean up active conversation tracking
+        this.activeConversations.delete(userId);
       });
     });
   }
@@ -170,12 +173,20 @@ class SocketHandler {
         }
       }
       socket.join(convId);
+      // Track that this user is actively viewing this conversation
+      this.activeConversations.set(socket.data.userId, convId);
       socket.emit('joinedConversation', { conversationId: convId });
     });
 
     socket.on('leaveConversation', (data = {}) => {
       const convId = data.conversationId?.toString();
-      if (convId) socket.leave(convId);
+      if (convId) {
+        socket.leave(convId);
+        // Remove from active conversation tracking if leaving the current conversation
+        if (this.activeConversations.get(socket.data.userId) === convId) {
+          this.activeConversations.delete(socket.data.userId);
+        }
+      }
       socket.emit('leftConversation', { conversationId: convId });
     });
   }
@@ -259,10 +270,14 @@ class SocketHandler {
       (conversation.participants || []).forEach((participant) => {
         const participantId = String(participant.user._id || participant.user);
         if (participantId !== sendId) {
-          this.io.to(participantId).emit('newMessageNotification', {
-            conversationId: convId,
-            message: messageObj,
-          });
+          // Only send notification if the user is NOT actively viewing this conversation
+          const userActiveConversation = this.activeConversations.get(participantId);
+          if (userActiveConversation !== convId) {
+            this.io.to(participantId).emit('newMessageNotification', {
+              conversationId: convId,
+              message: messageObj,
+            });
+          }
         }
       });
       if (typeof ack === 'function') ack({ success: true, message: messageObj });
