@@ -244,6 +244,34 @@ const removeFriend = async (request, h) => {
       ]
     });
 
+    // Find and deactivate conversations between these users
+    const { Conversations } = require('../models/index');
+    await Conversations.updateMany(
+      {
+        'participants.user': { $all: [userId, friendId] },
+        isActive: true
+      },
+      {
+        isActive: false,
+        deactivatedAt: new Date(),
+        deactivatedReason: 'friendship_removed'
+      }
+    );
+
+    // Emit real-time notification to both users
+    const io = request.server.plugins.socket.io;
+    
+    // Notify both users that friendship is removed
+    io.to(userId).emit('friendRemoved', {
+      friendId: friendId,
+      message: 'Friendship has been removed'
+    });
+    
+    io.to(friendId).emit('friendRemoved', {
+      friendId: userId,
+      message: 'Friendship has been removed'
+    });
+
     return h.response({
       message: 'Friend removed successfully'
     });

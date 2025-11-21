@@ -42,8 +42,6 @@ const conversationSchema = new mongoose.Schema({
   }
 });
 
-// Ensure unique conversations between the same set of participants
-conversationSchema.index({ 'participants.user': 1 }, { unique: true });
 
 conversationSchema.pre('save', function(next) {
   this.updatedAt = Date.now();

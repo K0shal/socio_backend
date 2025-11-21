@@ -1,4 +1,4 @@
-const { Conversations, Messages, User } = require('../models/index');
+const { Conversations, Messages, User, Friends } = require('../models/index');
 const jwt = require('jsonwebtoken');
 const config = require('../config/config');
 
@@ -137,6 +137,34 @@ class SocketHandler {
           return;
         }
 
+        // Check if participants are still friends
+        const otherParticipant = conversation.participants.find(
+          p => p.user.toString() !== socket.userId.toString()
+        );
+        
+        if (otherParticipant) {
+          const friendship = await Friends.findOne({
+            $or: [
+              { user: socket.userId, friend: otherParticipant.user },
+              { user: otherParticipant.user, friend: socket.userId }
+            ]
+          });
+
+          console.log('Friendship check for join conversation:', {
+            userId: socket.userId,
+            otherUserId: otherParticipant.user,
+            friendshipExists: !!friendship
+          });
+
+          if (!friendship) {
+            console.log('Blocking conversation join - users are not friends');
+            socket.emit('error', { error: 'You must be friends to join this conversation' });
+            return;
+          } else {
+            console.log('Allowing conversation join - users are friends');
+          }
+        }
+
         socket.join(convId.toString());
        
         
@@ -170,6 +198,72 @@ class SocketHandler {
         const convId = conversationId?.toString() || conversationId;
         const sendId = senderId?.toString() || senderId;
         
+        // Verify user is part of conversation
+        const conversation = await Conversations.findById(convId);
+        if (!conversation) {
+          socket.emit('messageError', { error: 'Conversation not found' });
+          return;
+        }
+
+        const isParticipant = conversation.participants.some(
+          p => p.user.toString() === sendId.toString()
+        );
+
+        if (!isParticipant) {
+          socket.emit('messageError', { error: 'Unauthorized to send message in this conversation' });
+          return;
+        }
+
+        // Check if participants are still friends
+        const otherParticipant = conversation.participants.find(
+          p => p.user.toString() !== sendId.toString()
+        );
+        
+        if (otherParticipant) {
+          console.log('Checking friendship between users:', {
+            senderId: sendId,
+            otherUserId: otherParticipant.user,
+            senderIdType: typeof sendId,
+            otherUserIdType: typeof otherParticipant.user
+          });
+
+          // Try multiple query approaches to debug
+          const friendship1 = await Friends.findOne({
+            user: sendId,
+            friend: otherParticipant.user
+          });
+          
+          const friendship2 = await Friends.findOne({
+            user: otherParticipant.user,
+            friend: sendId
+          });
+          
+          const friendship3 = await Friends.findOne({
+            $or: [
+              { user: sendId, friend: otherParticipant.user },
+              { user: otherParticipant.user, friend: sendId }
+            ]
+          });
+
+          console.log('Friendship query results:', {
+            query1: !!friendship1,
+            query2: !!friendship2,
+            query3: !!friendship3,
+            senderId: sendId,
+            otherUserId: otherParticipant.user
+          });
+
+          const friendship = friendship3;
+
+          if (!friendship) {
+            console.log('Blocking message - users are not friends');
+            socket.emit('messageError', { error: 'You must be friends to send messages' });
+            return;
+          } else {
+            console.log('Allowing message - users are friends');
+          }
+        }
+        
         // Create new message
         const message = new Messages({
           conversation: convId,
@@ -201,7 +295,6 @@ class SocketHandler {
         this.io.to(convId.toString()).emit('newMessage', messageObj);
         
         // Also emit to participants' personal rooms for notifications
-        const conversation = await Conversations.findById(convId);
         if (conversation) {
           conversation.participants.forEach(participant => {
             if (participant.user.toString() !== sendId.toString()) {
