@@ -61,8 +61,8 @@ const sendFriendRequest = async (request, h) => {
 
     await friendRequest.save();
     await friendRequest.populate([
-      { path: 'sender', select: 'firstName lastName email profilePicture' },
-      { path: 'receiver', select: 'firstName lastName email profilePicture' }
+      { path: 'sender', select: 'name email profilePicture' },
+      { path: 'receiver', select: 'name email profilePicture' }
     ]);
 
     // Emit real-time notification to receiver
@@ -92,7 +92,7 @@ const getFriendRequests = async (request, h) => {
     const friendRequests = await FriendRequests.find({
       receiver: userId,
       status: 'pending'
-    }).populate('sender', 'firstName lastName email profilePicture')
+    }).populate('sender', 'name email profilePicture')
       .sort({ requestDate: -1 });
 
     return h.response({
@@ -147,17 +147,14 @@ const acceptFriendRequest = async (request, h) => {
     await Promise.all([friendship1.save(), friendship2.save()]);
 
     // Populate sender info for notification
-    await friendRequest.populate('sender', 'firstName lastName email profilePicture');
+    await friendRequest.populate('sender', 'name email profilePicture');
 
     // Emit real-time notification to sender
+    const receiverUser = await User.findById(friendRequest.receiver).select('name email profilePicture');
     const io = request.server.plugins.socket.io;
     io.to(friendRequest.sender.toString()).emit('friendRequestAccepted', {
       requestId: friendRequest._id,
-      receiver: {
-        _id: friendRequest.receiver,
-        firstName: (await User.findById(friendRequest.receiver).select('firstName lastName')).firstName,
-        lastName: (await User.findById(friendRequest.receiver).select('firstName lastName')).lastName
-      },
+      receiver: receiverUser,
       message: 'Your friend request was accepted!'
     });
 
@@ -217,7 +214,7 @@ const getFriends = async (request, h) => {
 
     // Get friends for the specified user
     const friends = await Friends.find({ user: userId })
-      .populate('friend', 'firstName lastName email profilePicture')
+      .populate('friend', 'name email profilePicture')
       .sort({ friendshipDate: -1 });
 
     const friendList = friends.map(f => f.friend);

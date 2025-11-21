@@ -5,7 +5,7 @@ const friendsRoutes = [
   // Send friend request
   {
     method: 'POST',
-    path: '/users/friend-request',
+    path: '/api/users/friend-request',
     handler: friendsController.sendFriendRequest,
     options: {
       auth: 'jwt',
@@ -20,7 +20,7 @@ const friendsRoutes = [
   // Get friend requests for current user
   {
     method: 'GET',
-    path: '/users/friend-requests',
+    path: '/api/users/friend-requests',
     handler: friendsController.getFriendRequests,
     options: {
       auth: 'jwt'
@@ -30,7 +30,7 @@ const friendsRoutes = [
   // Accept friend request
   {
     method: 'POST',
-    path: '/users/friend-request/{requestId}/accept',
+    path: '/api/users/friend-request/{requestId}/accept',
     handler: friendsController.acceptFriendRequest,
     options: {
       auth: 'jwt',
@@ -45,7 +45,7 @@ const friendsRoutes = [
   // Reject friend request
   {
     method: 'POST',
-    path: '/users/friend-request/{requestId}/reject',
+    path: '/api/users/friend-request/{requestId}/reject',
     handler: friendsController.rejectFriendRequest,
     options: {
       auth: 'jwt',
@@ -60,7 +60,7 @@ const friendsRoutes = [
   // Get friends list for a user
   {
     method: 'GET',
-    path: '/users/{userId}/friends',
+    path: '/api/users/{userId}/friends',
     handler: friendsController.getFriends,
     options: {
       auth: 'jwt',
@@ -75,7 +75,7 @@ const friendsRoutes = [
   // Remove friend
   {
     method: 'DELETE',
-    path: '/users/friends/{friendId}',
+    path: '/api/users/friends/{friendId}',
     handler: friendsController.removeFriend,
     options: {
       auth: 'jwt',
@@ -90,7 +90,7 @@ const friendsRoutes = [
   // Check friendship status
   {
     method: 'GET',
-    path: '/users/{userId}/friendship-status',
+    path: '/api/users/{userId}/friendship-status',
     handler: friendsController.checkFriendshipStatus,
     options: {
       auth: 'jwt',
